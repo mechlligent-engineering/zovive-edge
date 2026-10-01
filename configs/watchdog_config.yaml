@@ -1,0 +1,7 @@
+# Placeholder for the systemd watchdog integration (batch 2:
+# watchdog/ + systemd unit WatchdogSec + sd_notify from edge_main.py).
+# Documented now so the field report's "disabled RuntimeWatchdogSec"
+# investigation has a clear place to record the eventual re-enabled value.
+watchdog:
+  enabled: false
+  heartbeat_interval_sec: 15

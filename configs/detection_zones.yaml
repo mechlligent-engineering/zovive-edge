@@ -1,0 +1,14 @@
+# Optional polygon zones (normalized 0..1 image coordinates) per camera
+# view. The camera never changes direction, so there are only two views:
+#   wide   - the normal fully-wide view
+#   zoomed - while camera_control/zoom_controller.py is zoomed in on an
+#            animal (polygons drawn for the wide view do NOT line up here)
+# pipeline/zone_filter.py drops detections whose box center falls outside
+# every zone for the current view. Leave a view's zone list empty (or
+# omit it) to disable filtering for that view — the default.
+zones:
+  wide: []
+  zoomed: []
+  # Example of a real zone (a road/fence line to ignore, say):
+  # wide:
+  #   - [[0.0, 0.6], [1.0, 0.6], [1.0, 1.0], [0.0, 1.0]]

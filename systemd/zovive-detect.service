@@ -1,0 +1,18 @@
+[Unit]
+Description=ZOVIVE detection pipeline
+After=network-online.target var-lib-zovive.mount data.mount
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zovive
+WorkingDirectory=/opt/zovive
+EnvironmentFile=/opt/zovive/.env
+ExecStart=/opt/zovive/.venv/bin/python edge_main.py
+Restart=always
+RestartSec=3
+# a detection crash must not take the uploader down with it
+OOMPolicy=continue
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,27 @@
+# CP Plus camera stream settings.
+# Two profiles: sub-stream for continuous detection (low res, low CPU
+# decode cost — the Pi 5 has no H.264 hardware decoder), main-stream
+# pulled once on trigger for a high-res snapshot.
+camera:
+  host: "192.168.1.64"
+  username: "admin"
+  password: "changeme"
+
+  sub_stream:
+    # rtsp URL template; {host}/{user}/{pass} filled in at runtime.
+    url: "rtsp://{user}:{pass}@{host}:554/cam/realmonitor?channel=1&subtype=1"
+    width: 640
+    height: 360
+    target_fps: 8
+
+  main_stream:
+    url: "rtsp://{user}:{pass}@{host}:554/cam/realmonitor?channel=1&subtype=0"
+    width: 1920
+    height: 1080
+
+reconnect:
+  initial_backoff_sec: 1.0
+  max_backoff_sec: 30.0
+  backoff_multiplier: 2.0
+  # Log + increment stream_health.stalled_count if no frame arrives for this long.
+  stall_timeout_sec: 5.0

@@ -1,0 +1,8 @@
+keep_after_ack_hours: 0          # 0 = purge blobs immediately on verified FINAL_ACK
+purge_cache_with_evidence: true  # derivatives and staging go with the blobs
+min_free_gb: 20
+max_evidence_gb: 120
+eviction_order: [acked, oldest_low_confidence, oldest_unacked]
+never_evict_unacked_before_hours: 72
+alert_on_unacked_count: 500
+orphan_scan_interval_min: 60

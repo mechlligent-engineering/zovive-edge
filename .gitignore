@@ -1,0 +1,26 @@
+# Runtime data (db, snapshots, logs, cache) — never committed.
+var/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Model weights are large and versioned via models/manifest.json + your
+# own artifact storage, not git. Keep the manifest, drop the binaries.
+models/*.onnx
+models/*.hef
+models/backup/*.onnx
+models/backup/*.hef
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+.env
+venv/
+.venv/
+
+# OS / editor cruft
+.DS_Store
+*.swp

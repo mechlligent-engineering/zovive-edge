@@ -1,0 +1,23 @@
+# Local storage layout and cleanup. Loaded by utils/config_loader.py (cfg.storage).
+# `root` is resolved against the project root when relative; the directories
+# below are resolved against `root` when relative. On the Pi, set ZOVIVE_HOME
+# to the SSD mount (e.g. /var/lib/zovive). Same variable as paths.py.
+schema_version: 1
+
+root: "${ZOVIVE_HOME:-var}"
+image_dir: snapshots
+video_dir: clips
+temp_dir: tmp
+database_dir: db
+
+retention_days: 30             # delete local evidence older than this
+
+cleanup:
+  strategy: uploaded_first     # uploaded_first | oldest_first
+  interval_minutes: 60
+  delete_only_uploaded: true   # never delete evidence the base station hasn't acked
+  purge_temp_on_startup: true
+
+disk:
+  usage_threshold_percent: 80  # start cleanup above this
+  critical_percent: 95         # emergency: pause recording, alert

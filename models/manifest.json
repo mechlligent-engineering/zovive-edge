@@ -1,0 +1,20 @@
+{
+  "model_version": "v0.1.0-unreleased",
+  "detector": {
+    "onnx_path": "models/detector.onnx",
+    "hef_path": "models/detector.hef",
+    "sha256_onnx": null,
+    "sha256_hef": null,
+    "classes": ["deer", "gaur", "leopard", "elephant", "sloth_bear", "tiger", "wild_boar"],
+    "trained_from": "zovive-ml/dataset_generic",
+    "notes": "Fill in sha256 + trained_from commit once detector.onnx/.hef are exported from zovive-ml. ota/checksum_verify.py (batch 2) will verify against these hashes before activating a new model on the Pi."
+  },
+  "classifier": {
+    "onnx_path": "models/classifier.onnx",
+    "hef_path": "models/classifier.hef",
+    "sha256_onnx": null,
+    "sha256_hef": null,
+    "classes": ["deer", "gaur", "leopard", "elephant", "sloth_bear", "tiger", "wild_boar"],
+    "trained_from": "zovive-ml/dataset_species"
+  }
+}

@@ -1,0 +1,16 @@
+# ruff isn't runnable in every environment (see requirements-dev.txt),
+# but CI (which has full internet) installs and runs it — this is its
+# config. Kept permissive: this is an edge/robotics codebase with a lot
+# of dataclasses and hardware I/O, not a library, so we don't chase
+# every style nit.
+line-length = 110
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+    "E501",  # line length handled loosely; long log/config lines are common
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["F401"]  # test files sometimes import fixtures for side effects

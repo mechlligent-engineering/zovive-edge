@@ -1,0 +1,11 @@
+# Additional requirements for the Raspberry Pi 5 deployment only.
+# Install after requirements.txt.
+-r requirements.txt
+
+# ONVIF PTZ control for the CP Plus camera.
+onvif-zeep>=0.2.12
+zeep>=4.2
+
+# HailoRT Python bindings are NOT installed via pip. Run
+# provisioning/install_hailort.sh, which installs the .deb / .whl that
+# matches the Hailo Dataflow Compiler version used to build models/*.hef.

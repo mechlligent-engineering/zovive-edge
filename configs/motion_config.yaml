@@ -1,0 +1,12 @@
+source: both            # camera | software | both
+software:
+  algorithm: MOG2
+  history: 500
+  var_threshold: 24
+  learning_rate: 0.002
+  min_blob_px: 1200      # tune per site with tools/motion_tuner.py
+  persist_frames: 3      # motion must survive K consecutive frames
+  downscale: 0.5
+cooldown_s: 2
+sweep_interval_s: 8      # safety net: run Stage 1 anyway, catches stationary animals
+log_every_trigger: true  # you need the trigger/animal ratio to retune. Do not disable.

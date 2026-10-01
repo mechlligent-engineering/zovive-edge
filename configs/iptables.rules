@@ -1,0 +1,1 @@
+# Allow only the base station and local subnet. Applied by systemd/apply_firewall.sh.

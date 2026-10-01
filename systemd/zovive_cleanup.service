@@ -1,0 +1,6 @@
+[Unit]
+Description=ZOVIVE periodic cleanup
+
+[Service]
+Type=oneshot
+ExecStart=/opt/zovive/.venv/bin/python -m utils.cleanup_daemon

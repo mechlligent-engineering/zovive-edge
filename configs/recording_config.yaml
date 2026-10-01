@@ -1,0 +1,8 @@
+source: sub            # sub | main   (sub recommended: no transcode, small clips)
+segment_len_s: 2
+ring_segments: 15
+pre_roll_s: 5
+post_roll_s: 5
+max_clip_s: 20         # hard cap - a loitering herd must not produce a 4 minute file
+container: mp4
+remux_only: true       # NEVER re-encode on a Pi 5

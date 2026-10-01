@@ -1,0 +1,28 @@
+# Detector settings. Loaded by utils/config_loader.py (cfg.inference).
+# Relative paths are resolved against the project root.
+schema_version: 1
+
+backend: "${ZOVIVE_INFERENCE_BACKEND:-onnx}"   # onnx (CPU) | hailo (Pi 5 AI HAT)
+model_path: models/detector.onnx
+input_size: 640
+
+confidence_threshold: 0.45     # 0 < x <= 1
+iou_threshold: 0.45            # NMS IoU, 0 < x <= 1
+max_detections: 100
+
+# Order MUST match the order the model was trained with.
+classes:
+  - deer
+  - gaur
+  - leopard
+  - elephant
+  - sloth_bear
+  - tiger
+  - wild_boar
+
+# Used only when backend is "hailo"; hef_path is then required.
+hailo:
+  hef_path: models/detector.hef
+  device_id: null              # null = first available device
+  batch_size: 1
+  options: {}

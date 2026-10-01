@@ -1,0 +1,72 @@
+# Detector + classifier model paths and thresholds.
+# class order MUST match the order the detector/classifier were trained
+# with (see zovive-ml/dataset_generic/data.yaml and dataset_species).
+detector:
+  onnx_path: "models/detector.onnx"
+  hef_path: "models/detector.hef"
+  input_size: 640
+  classes:
+    - deer
+    - gaur
+    - leopard
+    - elephant
+    - sloth_bear
+    - tiger
+    - wild_boar
+  confidence_threshold: 0.45
+  nms_iou_threshold: 0.45
+  # A track needs an animal in at least this many of the last N frames
+  # before stage1_gate promotes it to a real event (see track_state_machine.py).
+  min_hits_in_window: 3
+  window_size: 5
+  # Per-track cooldown: suppress duplicate events for the same track for
+  # this long after its last alert (stops a sleeping tiger alerting forever).
+  track_alert_cooldown_sec: 300.0
+
+classifier:
+  onnx_path: "models/classifier.onnx"
+  hef_path: "models/classifier.hef"
+  input_size: 224
+  classes:
+    - deer
+    - gaur
+    - leopard
+    - elephant
+    - sloth_bear
+    - tiger
+    - wild_boar
+  # Below this confidence (after combining crops per voting_strategy),
+  # stage2_verifier reports "unknown_animal" with the snapshot instead
+  # of a (possibly wrong) species name.
+  min_confidence: 0.55
+  # Classify at most this many of the best crops per track before
+  # combining them into one final species (pipeline/stage2_verifier.py).
+  max_crops_per_track: 5
+  # How the per-crop classifications are combined into one species:
+  #   average  - average the softmax vectors, argmax the average (default)
+  #   majority - each crop votes for its own argmax class; most votes wins,
+  #              ties broken by summed confidence
+  voting_strategy: "average"
+
+# SAHI (Slicing Aided Hyper Inference) — improves recall on small/far
+# animals (distant Wild Boar, Deer) by running the detector on
+# overlapping tiles of the frame instead of one downscaled pass, then
+# merging results back with NMS. Off by default: it's several detector
+# calls per frame instead of one, so only enable it where the extra
+# CPU/NPU cost is acceptable. Wraps the existing Detector (ONNX or
+# Hailo) transparently — inference/sahi_slicer.py, no changes to
+# either backend.
+sahi:
+  enabled: false
+  # A frame already <= tile_size in both dimensions is passed straight
+  # through with no slicing (the default 640x360 sub-stream already
+  # fits in one 640 tile). Set tile_size SMALLER than your capture
+  # resolution to force tiling and recover far/small animals, e.g.
+  # tile_size: 320 against the 640x360 sub-stream gives ~2x2 overlapping
+  # tiles each seen at double the effective resolution.
+  tile_size: 640
+  overlap_ratio: 0.2      # fraction of tile_size shared between adjacent tiles
+  run_full_frame_pass: true   # also run one full-frame pass to catch large/close animals
+  merge_iou_threshold: 0.5    # NMS threshold when merging tile + full-frame detections
+
+model_version: "v0.1.0-unreleased"

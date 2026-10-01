@@ -1,0 +1,24 @@
+# Event video recorder (pipeline/ram_buffer.py + pipeline/clip_extractor.py).
+# Saves a short MP4 around each alert — the pre-event seconds from an
+# in-memory rolling buffer plus the post-event seconds captured live —
+# alongside the existing JPEG snapshot. The image alert (db/outbox +
+# alert_dispatcher) is unaffected either way: a clip is attached to an
+# already-dispatched event asynchronously, never blocks it.
+clip:
+  enabled: true
+  pre_event_seconds: 8.0
+  post_event_seconds: 8.0
+  # Should match (or be close to) the capture target FPS in
+  # rtsp_config.yaml / the FileFrameSource fps used, since that's the
+  # real rate frames arrive at the pipeline thread; it sizes the
+  # pre-event ring buffer and is the FPS written into the MP4 header.
+  fps: 8.0
+  # Downscale the clip's width before writing, keeping aspect ratio;
+  # 0 or null = write at native (capture) resolution.
+  max_width: 640
+  codec: "mp4v"
+  # Safety cap: if a burst of overlapping events tries to record more
+  # than this many clips at once, extras are dropped (logged) rather
+  # than letting memory grow unbounded during, say, a herd passing
+  # through camera view.
+  max_concurrent_recordings: 4

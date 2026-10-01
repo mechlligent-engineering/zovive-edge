@@ -1,0 +1,16 @@
+# Core dependencies — install on the laptop, in CI, and on the Pi.
+# HailoRT is intentionally NOT here: it ships as a .whl from Hailo's
+# own installer (see provisioning/install_hailort.sh) and isn't on PyPI.
+numpy>=1.26,<2.0
+opencv-python-headless>=4.9
+PyYAML>=6.0
+onnxruntime>=1.17          # CPU inference backend; used on laptop, CI, and
+                            # on the Pi for the classifier (runs only on trigger)
+requests>=2.31              # base-station HTTP client (network/, batch 2)
+
+# --- dev / test only (not needed on the Pi in production) -----------------
+# No pytest/ruff pin here on purpose: this repo's tests run on the
+# stdlib `unittest` module so a bare `python3 -m unittest discover` works
+# with zero extra installs. If your environment *can* reach PyPI, `pip
+# install pytest ruff` and both `pytest tests/` and `ruff check .` work
+# too — pytest happily collects unittest.TestCase classes.

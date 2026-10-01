@@ -1,0 +1,30 @@
+# Camera stream settings. Loaded by utils/config_loader.py (cfg.camera).
+# Credentials and host come from the environment (see .env.example); the
+# values after ":-" are fallbacks for development only.
+schema_version: 1
+
+camera_id: "cam01"
+rtsp_url: "rtsp://${ZOVIVE_CAMERA_USERNAME:-admin}:${ZOVIVE_CAMERA_PASSWORD:-changeme}@${ZOVIVE_CAMERA_HOST:-192.168.1.64}:554/cam/realmonitor?channel=1&subtype=1"
+transport: tcp                 # tcp | udp  (tcp is more reliable over weak links)
+
+resolution:
+  width: 640
+  height: 360
+fps: 8
+timeout_sec: 10                # no frame for this long => stream considered dead
+
+reconnect:
+  enabled: true
+  initial_delay_sec: 1
+  max_delay_sec: 30
+  backoff_multiplier: 2.0
+  max_attempts: 0              # 0 = keep retrying forever
+
+# Pan/tilt/zoom control. Leave disabled for fixed cameras.
+ptz:
+  enabled: false
+  protocol: onvif              # onvif | http_cgi
+  host: "${ZOVIVE_CAMERA_HOST:-192.168.1.64}"
+  port: 80
+  home_preset: null
+  options: {}                  # vendor-specific settings, passed through unvalidated

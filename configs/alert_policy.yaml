@@ -1,0 +1,10 @@
+# What counts as alert-worthy, and how urgently to send it.
+# pipeline/alert_dispatcher.py reads this to decide priority; the
+# actual send/retry logic lives in network/ (batch 2).
+alert_policy:
+  # Species that should be sent with high priority (dangerous / rare).
+  high_priority_species: ["tiger", "leopard", "elephant", "sloth_bear"]
+  # Send an "unknown_animal" alert even when classification confidence
+  # is below classifier.min_confidence, rather than dropping it.
+  send_unknown_animal_alerts: true
+  min_snapshot_sharpness: 40.0

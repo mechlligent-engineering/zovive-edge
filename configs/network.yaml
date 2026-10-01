@@ -1,0 +1,14 @@
+# Base station connectivity. Loaded by utils/config_loader.py (cfg.network).
+# Set ZOVIVE_BASE_STATION_IP / ZOVIVE_BASE_STATION_PORT per site; the
+# fallbacks after ":-" are for development only.
+schema_version: 1
+
+base_station:
+  host: "${ZOVIVE_BASE_STATION_IP:-192.168.1.110}"   # IPv4/IPv6 or hostname
+  port: "${ZOVIVE_BASE_STATION_PORT:-8000}"
+  scheme: http                                        # http | https
+
+heartbeat_interval_sec: 30
+upload_retry_count: 5
+connection_timeout_sec: 10
+registration_timeout_sec: 30

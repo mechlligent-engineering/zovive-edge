@@ -1,0 +1,5 @@
+# Optional, only useful where PyPI is reachable (e.g. your laptop, CI).
+# The test suite itself does not require these — see requirements.txt.
+-r requirements.txt
+pytest>=8.0
+ruff>=0.4

@@ -1,0 +1,14 @@
+[Unit]
+Description=ZOVIVE health, watchdog and disk guard
+After=var-lib-zovive.mount
+
+[Service]
+Type=simple
+User=zovive
+WorkingDirectory=/opt/zovive
+ExecStart=/opt/zovive/.venv/bin/python health_main.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

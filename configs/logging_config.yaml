@@ -1,0 +1,8 @@
+# Human-editable knobs for logger_setup.py. The code defaults match
+# these values; this file exists so field operators can turn up
+# verbosity without a redeploy.
+logging:
+  level: "INFO"
+  max_bytes: 10485760   # 10 MiB per file before rotation
+  backup_count: 5
+  to_stdout: true

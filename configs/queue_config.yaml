@@ -1,0 +1,8 @@
+# Bounded, drop-oldest queue sizes. Every drop is counted in
+# queues/queue_monitor.py and surfaced in the health heartbeat, so a
+# camera that's producing faster than we can process shows up in
+# metrics instead of silently backing up memory.
+queues:
+  detection_queue_size: 4
+  alert_queue_size: 64
+  offline_queue_max_items: 5000

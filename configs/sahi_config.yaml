@@ -1,0 +1,8 @@
+slice_height: 640
+slice_width: 640
+overlap_height_ratio: 0.2
+overlap_width_ratio: 0.2
+batch_size: 8
+max_tiles: 8
+merge_with_full_frame: true
+postprocess_nms_iou: 0.5

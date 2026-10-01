@@ -1,0 +1,32 @@
+# Operating mode + animal-aware zoom for camera_control/mode_manager.py
+# and camera_control/zoom_controller.py. The CP Plus camera is a fixed
+# motorized-lens camera: only optical zoom and focus are ever commanded,
+# never pan or tilt.
+mode:
+  # auto: zoom_controller zooms/focuses on far animals by itself.
+  # manual: an operator has the lens; no automatic zoom sessions start.
+  default_mode: "auto"
+  zoom:
+    enabled: true
+    # ONVIF zoom-space values for fully wide and fully tele (usually 0..1).
+    wide_zoom_level: 0.0
+    max_zoom_level: 1.0
+    # Tele / wide focal-length ratio of the lens (2.8-12 mm ≈ 4.3x).
+    max_optical_magnification: 4.0
+    # Animal is "far" when its larger box side fills less than this
+    # fraction of the frame; zoom until it fills about target_fill_ratio.
+    far_fill_ratio: 0.25
+    target_fill_ratio: 0.5
+    # Don't bother zooming for less than this (the camera can't pan, so
+    # an off-centre animal limits how far we can zoom and stay in frame).
+    min_useful_magnification: 1.5
+    edge_margin_ratio: 0.1
+    # Frames are skipped while the lens moves / focuses.
+    zoom_settle_sec: 2.0
+    focus_settle_sec: 1.5
+    # Give up on the zoomed re-detection after this long and alert with
+    # the wide-view snapshot instead.
+    zoomed_timeout_sec: 10.0
+    # After a zoom session, don't re-zoom or re-alert the same animal
+    # (new wide-view track id) for this long.
+    suppress_realert_sec: 60.0

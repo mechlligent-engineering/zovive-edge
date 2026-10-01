@@ -1,0 +1,18 @@
+# Identity of this edge node. Every DB row, log line and alert carries
+# camera_id/node_id from here so multi-camera deployments stay attributable.
+node:
+  node_id: "zovive-node-01"
+  camera_id: "cam01"
+  camera_name: "North Gate"
+  forest_name: "Example Range"
+  gps:
+    lat: 0.0
+    lon: 0.0
+
+# Which detector backend to run. "onnx" runs on any CPU (laptop, CI);
+# "hailo" requires the Hailo-8 + HailoRT on the Pi. Selecting this here
+# (rather than at import time) is what lets edge_main.py run unchanged
+# on a laptop and on the Pi.
+runtime:
+  backend: "onnx"   # onnx | hailo
+  environment: "dev"  # dev | pi

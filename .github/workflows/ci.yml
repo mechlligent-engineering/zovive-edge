@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Test (pytest)
+        run: pytest tests/ -v
+
+      # Belt-and-suspenders: the whole suite also has to pass with the
+      # stdlib runner alone, since that's what a Pi or a locked-down
+      # environment without PyPI access falls back to.
+      - name: Test (stdlib unittest, no pytest)
+        run: python -m unittest discover -s tests -v
+
+  # Placeholder for zovive-ml's model-quality gate (batch 2): score a
+  # candidate detector/classifier against NEW_TEST_IMAGES + an
+  # empty-forest set and fail the build if recall or false-positive
+  # rate regresses versus the last released model_version in
+  # models/manifest.json. Needs the eval dataset and a GPU or a slow
+  # CPU job, so it's deliberately not wired up yet.
+  # model-quality-gate:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - run: echo "TODO: batch 2"

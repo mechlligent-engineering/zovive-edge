@@ -1,0 +1,5 @@
+# /etc/fstab additions. nofail on /data: a bad evidence partition must not block boot -
+# the node should come up degraded and report it, not sit at a rescue prompt.
+UUID=<log-uuid>    /var/log/zovive  ext4  defaults,noatime,nodev,nosuid,noexec      0 2
+UUID=<state-uuid>  /var/lib/zovive  ext4  defaults,noatime,nodev,nosuid,noexec      0 2
+UUID=<data-uuid>   /data            ext4  defaults,noatime,nodev,nosuid,noexec,nofail 0 2
