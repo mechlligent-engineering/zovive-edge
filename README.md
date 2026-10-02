@@ -22,8 +22,15 @@ python3 -m unittest discover -s tests -v      # 131 tests, no camera/model neede
 # Run the full pipeline against a local video file instead of a real camera.
 # (You'll still need models/detector.onnx and models/classifier.onnx —
 #  export those from zovive-ml first; see docs/ARCHITECTURE.md.)
+# Camera credentials are always required (edge_main.py exits with code 78
+# if either is unset or empty); any non-empty value works for --source file:.
+export ZOVIVE_CAMERA_USERNAME=dev ZOVIVE_CAMERA_PASSWORD=dev
 python3 edge_main.py --source file:/path/to/some_video.mp4
 ```
+
+Credentials and API keys are never stored in `configs/*.yaml`; those files
+reference them as `${VAR}`. On a node they go in `/opt/zovive/.env` (copy
+`.env.example`), which systemd loads and git ignores.
 
 Set `configs/node_config.yaml`'s `runtime.environment: pi` and
 `runtime.backend: hailo` for the real Raspberry Pi + Hailo-8 deployment;

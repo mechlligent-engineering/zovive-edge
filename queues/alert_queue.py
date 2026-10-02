@@ -17,8 +17,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import paths
-from config_loader import load
 from queues.queue_monitor import BoundedDropOldestQueue
+from utils.config_loader import load
 
 log = logging.getLogger(__name__)
 

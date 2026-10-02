@@ -1,10 +1,11 @@
 # Camera stream settings. Loaded by utils/config_loader.py (cfg.camera).
-# Credentials and host come from the environment (see .env.example); the
-# values after ":-" are fallbacks for development only.
+# Host comes from the environment with a development fallback. Credentials
+# come ONLY from the environment (see .env.example): no default, so loading
+# fails if ZOVIVE_CAMERA_USERNAME or ZOVIVE_CAMERA_PASSWORD is unset or empty.
 schema_version: 1
 
 camera_id: "cam01"
-rtsp_url: "rtsp://${ZOVIVE_CAMERA_USERNAME:-admin}:${ZOVIVE_CAMERA_PASSWORD:-changeme}@${ZOVIVE_CAMERA_HOST:-192.168.1.64}:554/cam/realmonitor?channel=1&subtype=1"
+rtsp_url: "rtsp://${ZOVIVE_CAMERA_USERNAME}:${ZOVIVE_CAMERA_PASSWORD}@${ZOVIVE_CAMERA_HOST:-192.168.1.64}:554/cam/realmonitor?channel=1&subtype=1"
 transport: tcp                 # tcp | udp  (tcp is more reliable over weak links)
 
 resolution:

@@ -45,8 +45,8 @@ from typing import Any
 import cv2
 
 import paths
-from config_loader import load
 from pipeline.ram_buffer import BufferedFrame, RamBuffer
+from utils.config_loader import load
 
 log = logging.getLogger(__name__)
 

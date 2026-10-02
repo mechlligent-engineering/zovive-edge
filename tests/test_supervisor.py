@@ -26,7 +26,7 @@ from pipeline.zone_filter import ZoneFilter
 from queues.alert_queue import AlertQueue
 from queues.detection_queue import DetectionBatch, DetectionQueue
 from storage.evidence_store import EvidenceStore
-from tests.helpers import AlwaysClassifier, blank_frame
+from tests.helpers import AlwaysClassifier, blank_frame, camera_credentials
 from watchdog import sd_notify
 from watchdog.edge_status import EdgeStatus, evaluate_edge_health, read_status_file
 from watchdog.restart_history import UNCLEAN_EXIT, record_exit, record_start
@@ -245,9 +245,10 @@ class TestCaptureRestartable(unittest.TestCase):
         from capture.rtsp_reader import RtspReader
         from queues.frame_queue import LatestFrameSlot
 
-        # Default configs/rtsp_config.yaml; _open_capture is patched, so
-        # nothing ever connects to the configured camera.
-        return RtspReader(LatestFrameSlot(name="test_sup_slot"))
+        # Default configs/rtsp_config.yaml (with fake credentials);
+        # _open_capture is patched, so nothing ever connects to a camera.
+        with camera_credentials():
+            return RtspReader(LatestFrameSlot(name="test_sup_slot"))
 
     def test_crash_releases_capture_and_records_liveness(self):
         reader = self._reader()

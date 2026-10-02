@@ -6,6 +6,9 @@ After=var-lib-zovive.mount
 Type=simple
 User=zovive
 WorkingDirectory=/opt/zovive
+# Base station API key (configs/transfer_config.yaml -> ${ZOVIVE_BASE_STATION_API_KEY}).
+# "-": a missing .env must not stop the heartbeat that would report it.
+EnvironmentFile=-/opt/zovive/.env
 ExecStart=/opt/zovive/.venv/bin/python health_main.py
 Restart=always
 RestartSec=3

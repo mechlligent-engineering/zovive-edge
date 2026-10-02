@@ -32,10 +32,10 @@ import threading
 import time
 
 import paths
-from config_loader import load
 from db.init_db import init_db
 from logger_setup import configure_root, get_logger
 from network.base_station_client import BaseStationError, build_client
+from utils.config_loader import load
 from watchdog.edge_status import evaluate_edge_health, read_status_file
 
 log = get_logger(__name__)

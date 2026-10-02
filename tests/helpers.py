@@ -7,11 +7,32 @@ classes natively.
 
 from __future__ import annotations
 
+import os
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from unittest import mock
 
 import numpy as np
 
 from inference.base import ClassificationResult, Classifier, Detection, Detector
+from utils import config_loader
+
+# Fake camera credentials for tests that load configs/rtsp_config.yaml or
+# camera.yaml, which require ZOVIVE_CAMERA_USERNAME/PASSWORD. Not real secrets.
+TEST_CAMERA_ENV = {"ZOVIVE_CAMERA_USERNAME": "test-user", "ZOVIVE_CAMERA_PASSWORD": "test-pass"}  # nosec B105
+
+
+@contextmanager
+def camera_credentials(env: dict[str, str] | None = None) -> Iterator[None]:
+    """Put fake camera credentials in os.environ. Clears the config_loader.load()
+    cache on entry and exit so interpolated values never leak into other tests."""
+    config_loader.clear_cache()
+    try:
+        with mock.patch.dict(os.environ, TEST_CAMERA_ENV if env is None else env):
+            yield
+    finally:
+        config_loader.clear_cache()
 
 
 def blank_frame(width: int = 320, height: int = 240) -> np.ndarray:

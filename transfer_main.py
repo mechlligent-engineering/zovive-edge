@@ -14,7 +14,6 @@ import signal
 import time
 
 import paths
-from config_loader import load
 from db.init_db import init_db
 from db.migrations import migrate
 from db.outbox import (
@@ -31,6 +30,7 @@ from logger_setup import configure_root, get_logger
 from network.base_station_client import BaseStationError, build_client
 from network.transfer_state import TransferState
 from storage.local_file_cleanup import delete_local_file
+from utils.config_loader import load
 
 log = get_logger(__name__)
 

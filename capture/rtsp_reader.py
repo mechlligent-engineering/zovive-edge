@@ -22,8 +22,8 @@ import cv2
 import paths
 from capture.reconnect import ReconnectPolicy
 from capture.stream_health import StreamHealth
-from config_loader import load
 from queues.frame_queue import LatestFrameSlot
+from utils.config_loader import load
 
 log = logging.getLogger(__name__)
 

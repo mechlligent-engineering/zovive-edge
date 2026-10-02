@@ -12,6 +12,10 @@ into immutable, typed objects::
     cfg.storage.image_dir            # absolute pathlib.Path
     cfg.network.base_url             # "http://<host>:<port>"
 
+Runtime modules that read their own file as a plain dict use
+``load(paths.RTSP_CONFIG)`` instead; it shares the same strict YAML reader
+and ``${VAR}`` interpolation (see "Per-file access" below).
+
 Design notes
 ------------
 * **Fail loudly, all at once.** Every file is read and every field is
@@ -166,7 +170,10 @@ def _interpolate(
             if m.group(0) == "$$":
                 return "$"
             name, default = m.group(1), m.group(2)
-            if name in env:
+            # ${VAR} (no default) means "required": set-but-empty counts as
+            # missing, so `ZOVIVE_CAMERA_PASSWORD=` in .env cannot silently
+            # yield a blank credential. ${VAR:-x} keeps an explicit empty value.
+            if name in env and (env[name] != "" or default is not None):
                 return env[name]
             if default is not None:
                 return default
@@ -211,11 +218,14 @@ def _construct_unique_mapping(loader: _StrictLoader, node: yaml.MappingNode, dee
 _StrictLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping)
 
 
-def read_yaml_file(path: Path, source: str | None = None) -> tuple[dict[str, Any] | None, list[ConfigIssue]]:
+def read_yaml_file(
+    path: Path, source: str | None = None, *, allow_empty: bool = False
+) -> tuple[dict[str, Any] | None, list[ConfigIssue]]:
     """Read one YAML file into a dict.
 
     Never raises for expected failures; returns ``(None, issues)`` instead so
-    the caller can keep checking the remaining files.
+    the caller can keep checking the remaining files. ``allow_empty`` turns an
+    empty file into ``{}`` instead of an issue.
     """
     source = source or path.name
     try:
@@ -242,6 +252,8 @@ def read_yaml_file(path: Path, source: str | None = None) -> tuple[dict[str, Any
         return None, [ConfigIssue(source, "", f"malformed YAML: {exc}", IssueKind.PARSE)]
 
     if data is None:
+        if allow_empty:
+            return {}, []
         return None, [ConfigIssue(source, "", "file is empty", IssueKind.PARSE)]
     if not isinstance(data, dict):
         return None, [
@@ -251,6 +263,55 @@ def read_yaml_file(path: Path, source: str | None = None) -> tuple[dict[str, Any
     if bad_keys:
         return None, [ConfigIssue(source, "", f"top-level keys must be strings, got {bad_keys!r}", IssueKind.PARSE)]
     return data, []
+
+
+# --- Per-file access for runtime modules ----------------------------------
+#
+# edge_main.py, transfer_main.py, health_main.py and the pipeline read their
+# own YAML files (configs/rtsp_config.yaml, transfer_config.yaml, ...) as
+# plain dicts via ``load(paths.X_CONFIG)``. That goes through the same
+# strict reader and ${VAR} interpolation as ``load_config()``, so secrets
+# such as camera credentials live in the environment (/opt/zovive/.env),
+# never in a tracked YAML file.
+
+_file_cache: dict[Path, dict[str, Any]] = {}
+
+
+def load(path: str | Path, required: bool = True) -> dict[str, Any]:
+    """Load one YAML config file as a dict, with ``${VAR}`` interpolation.
+
+    Cached by resolved path; ``clear_cache()`` resets it (tests). Raises
+    ``ConfigError`` listing every problem: missing/malformed file, and every
+    ``${VAR}`` without a default whose variable is unset or empty. A missing
+    file with ``required=False`` loads as ``{}``.
+    """
+    p = Path(path).resolve()
+    if p in _file_cache:
+        return _file_cache[p]
+    if not required and not p.exists():
+        _file_cache[p] = {}
+        return _file_cache[p]
+
+    data, issues = read_yaml_file(p, p.name, allow_empty=True)
+    if data is None:
+        raise ConfigError(issues)
+
+    missing: list[ConfigIssue] = []
+
+    def on_missing_env(key: str, var: str) -> None:
+        missing.append(
+            ConfigIssue(p.name, key, f"required environment variable {var} is not set or is empty", IssueKind.MISSING_ENV)
+        )
+
+    data = _interpolate(data, os.environ, "", on_missing_env)
+    if missing:
+        raise ConfigError(missing)
+    _file_cache[p] = data
+    return data
+
+
+def clear_cache() -> None:
+    _file_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -1088,7 +1149,7 @@ class ConfigLoader:
 
         def on_missing_env(key: str, var: str) -> None:
             issues.append(
-                ConfigIssue(spec.filename, key, f"environment variable {var} is not set and no default given "
+                ConfigIssue(spec.filename, key, f"environment variable {var} is not set or is empty and no default given "
                             f"(use ${{{var}:-default}} to provide one)", IssueKind.MISSING_ENV)
             )
 

@@ -14,7 +14,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import config_loader
 import paths
 from db.init_db import init_db
 from db.outbox import (
@@ -27,6 +26,7 @@ from db.outbox import (
 from network.base_station_client import BaseStationError
 from network.transfer_state import TransferState
 from transfer_main import _send_pending_images, _send_pending_videos, run
+from utils import config_loader
 
 
 class _FakeImageClient:

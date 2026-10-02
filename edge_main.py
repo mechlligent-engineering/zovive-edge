@@ -29,6 +29,7 @@ import argparse
 import logging
 import os
 import signal
+import sys
 import threading
 import time
 
@@ -38,7 +39,6 @@ from camera_control.mode_manager import ModeManager
 from camera_control.zoom_controller import WIDE_VIEW, ZOOMED_VIEW, AnimalZoomController, ZoomState
 from capture.file_source import FileFrameSource
 from capture.rtsp_reader import RtspReader
-from config_loader import load
 from db.init_db import init_db
 from db.migrations import migrate
 from db.outbox import set_video_path
@@ -60,6 +60,7 @@ from queues.alert_queue import AlertQueue
 from queues.detection_queue import DetectionBatch, DetectionQueue
 from queues.frame_queue import LatestFrameSlot
 from queues.queue_monitor import snapshot as queues_snapshot
+from utils.config_loader import ConfigError, load
 from watchdog import sd_notify
 from watchdog.edge_status import EdgeStatus, write_status_file
 from watchdog.restart_history import record_exit, record_start
@@ -72,6 +73,8 @@ _shutdown_event = threading.Event()
 EXIT_OK = 0
 # A worker hung or ran out of restarts; systemd (Restart=always) restarts us.
 EXIT_SUPERVISOR = 70
+# Configuration invalid, e.g. ZOVIVE_CAMERA_USERNAME/PASSWORD missing (sysexits EX_CONFIG).
+EXIT_CONFIG = 78
 SUPERVISOR_POLL_SEC = 0.5
 
 
@@ -551,7 +554,14 @@ def main() -> None:
     )
     parser.add_argument("--max-cycles", type=int, default=None, help="stop after N pipeline cycles (testing)")
     args = parser.parse_args()
-    exit_code = run(source_override=args.source, max_cycles=args.max_cycles)
+    try:
+        exit_code = run(source_override=args.source, max_cycles=args.max_cycles)
+    except ConfigError as exc:
+        # Missing camera credentials or a bad config file: one clear line
+        # naming the file, key and variable (never its value), no traceback.
+        log.critical("refusing to start: invalid configuration", extra={"problems": [str(i) for i in exc.issues]})
+        logging.shutdown()
+        sys.exit(EXIT_CONFIG)
     if exit_code != EXIT_OK:
         # os._exit, not sys.exit: a hung worker thread stuck in native code
         # (Hailo, FFmpeg) can block normal interpreter shutdown.

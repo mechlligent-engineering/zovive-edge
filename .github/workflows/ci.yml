@@ -28,22 +28,23 @@ jobs:
       - name: Lint (ruff)
         run: ruff check .
 
+      # Verify only; never rewrites files in CI. Fix locally with `ruff format .`.
+      - name: Format check (ruff)
+        run: ruff format --check .
+
       - name: Test (pytest)
         run: pytest tests/ -v
 
-      - name: Test (unittest)
+      # The whole suite must also pass with the stdlib runner alone, since
+      # that's what a Pi or a locked-down environment without PyPI access
+      # falls back to.
+      - name: Test (stdlib unittest, no pytest)
         run: python -m unittest discover -s tests -v
 
       # Settings live in .bandit (excludes only virtualenv/VCS dirs; tests/
       # are scanned). Passed explicitly so discovery can't pick another file.
       - name: Security Scan (Bandit)
         run: bandit --ini .bandit -r .
-
-      # Belt-and-suspenders: the whole suite also has to pass with the
-      # stdlib runner alone, since that's what a Pi or a locked-down
-      # environment without PyPI access falls back to.
-      - name: Test (stdlib unittest, no pytest)
-        run: python -m unittest discover -s tests -v
 
   # Placeholder for zovive-ml's model-quality gate (batch 2): score a
   # candidate detector/classifier against NEW_TEST_IMAGES + an

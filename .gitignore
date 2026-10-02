@@ -17,7 +17,10 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 
+# Secrets: real credentials live only in .env (see .env.example).
 .env
+.env.*
+!.env.example
 venv/
 .venv/
 

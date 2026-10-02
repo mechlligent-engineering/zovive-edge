@@ -3,9 +3,12 @@
 # decode cost — the Pi 5 has no H.264 hardware decoder), main-stream
 # pulled once on trigger for a high-res snapshot.
 camera:
-  host: "192.168.1.64"
-  username: "admin"
-  password: "changeme"
+  # Credentials come ONLY from the environment (/opt/zovive/.env, loaded by
+  # systemd; see .env.example). No default: edge_main.py refuses to start if
+  # either is unset or empty. Never put a real value in this tracked file.
+  host: "${ZOVIVE_CAMERA_HOST:-192.168.1.64}"
+  username: "${ZOVIVE_CAMERA_USERNAME}"
+  password: "${ZOVIVE_CAMERA_PASSWORD}"
 
   sub_stream:
     # rtsp URL template; {host}/{user}/{pass} filled in at runtime.
