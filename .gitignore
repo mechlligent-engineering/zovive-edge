@@ -24,3 +24,15 @@ venv/
 # OS / editor cruft
 .DS_Store
 *.swp
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# Bandit reports
+/*bandit*.txt
+/b_out.json
+
+# Temporary files
+/tmp_*
+/diff*.patch
