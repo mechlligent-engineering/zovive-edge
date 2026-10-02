@@ -79,7 +79,9 @@ class KnownAnimal:
     expires_ts: float
 
 
-def _center_inside(box: tuple[float, float, float, float], region: tuple[float, float, float, float], grow: float) -> bool:
+def _center_inside(
+    box: tuple[float, float, float, float], region: tuple[float, float, float, float], grow: float
+) -> bool:
     x1, y1, x2, y2 = region
     gx, gy = (x2 - x1) * grow, (y2 - y1) * grow
     cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
@@ -158,7 +160,11 @@ class AnimalZoomController:
         self._deadline = now + self.zoom_settle_sec
         log.info(
             "zooming in on far animal",
-            extra={"track_id": track_id, "magnification": round(magnification, 2), "zoom_level": round(level, 3)},
+            extra={
+                "track_id": track_id,
+                "magnification": round(magnification, 2),
+                "zoom_level": round(level, 3),
+            },
         )
 
     def tick(self, now: float | None = None) -> ZoomSession | None:
@@ -183,8 +189,10 @@ class AnimalZoomController:
                 log.info("back to wide view")
 
         elif self.state == ZoomState.ZOOMED and now >= self._deadline:
-            log.info("no animal confirmed in zoomed view; falling back to wide evidence",
-                     extra={"track_id": self.session.track_id})
+            log.info(
+                "no animal confirmed in zoomed view; falling back to wide evidence",
+                extra={"track_id": self.session.track_id},
+            )
             return self.session
 
         return None
@@ -202,6 +210,31 @@ class AnimalZoomController:
         self.camera.zoom_to(self.plan_config.wide_zoom_level)
         self.state = ZoomState.RETURNING
         self._deadline = now + self.zoom_settle_sec
+
+    def abort(self, now: float | None = None) -> None:
+        """Drop any zoom session without alerting and head back to wide.
+
+        Used when the pipeline thread crashed and is being restarted: the
+        session's evidence may be what caused the crash, and the animal is
+        normally re-detected once the lens is wide again. Goes through the
+        normal RETURNING -> FOCUSING -> WIDE path so frames stay skipped
+        until the lens has settled and refocused.
+        """
+        now = now if now is not None else self.clock()
+        dropped = self.session
+        self.session = None
+        returning_already = self.state == ZoomState.RETURNING or (
+            self.state == ZoomState.FOCUSING and self._focus_then == ZoomState.WIDE
+        )
+        if self.state == ZoomState.WIDE or returning_already:
+            return
+        self.camera.zoom_to(self.plan_config.wide_zoom_level)
+        self.state = ZoomState.RETURNING
+        self._deadline = now + self.zoom_settle_sec
+        log.warning(
+            "zoom session aborted; returning to wide view",
+            extra={"track_id": dropped.track_id if dropped else None},
+        )
 
     def remember(
         self,

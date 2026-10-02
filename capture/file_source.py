@@ -41,12 +41,11 @@ class FileFrameSource:
         self.health = StreamHealth(camera_id, stall_timeout_sec=9999)
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self.loop_ts: float | None = None  # see RtspReader.loop_ts
 
     def start(self) -> None:
         self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._run, name=f"file-source-{self.camera_id}", daemon=True
-        )
+        self._thread = threading.Thread(target=self.run, name=f"file-source-{self.camera_id}", daemon=True)
         self._thread.start()
 
     def stop(self, join_timeout: float = 5.0) -> None:
@@ -102,9 +101,11 @@ class FileFrameSource:
                 if not self.loop:
                     return
 
-    def _run(self) -> None:
+    def run(self) -> None:
         last_time = 0.0
+        self.loop_ts = time.time()
         for frame in self._iter_frames():
+            self.loop_ts = time.time()
             if self._stop_event.is_set():
                 break
             now = time.monotonic()

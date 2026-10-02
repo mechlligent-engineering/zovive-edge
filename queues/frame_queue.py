@@ -21,7 +21,7 @@ from queues.queue_monitor import registry
 
 @dataclass
 class FrameEnvelope:
-    frame: Any            # numpy ndarray (BGR), kept generic to avoid a hard cv2 dep here
+    frame: Any  # numpy ndarray (BGR), kept generic to avoid a hard cv2 dep here
     seq: int
     timestamp: float
     camera_id: str = ""

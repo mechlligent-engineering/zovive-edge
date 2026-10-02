@@ -50,7 +50,9 @@ class RamBuffer:
         return cls(frames)
 
     def offer(self, frame: Any, timestamp: float | None = None) -> None:
-        self._buf.append(BufferedFrame(frame=frame, timestamp=timestamp if timestamp is not None else time.time()))
+        self._buf.append(
+            BufferedFrame(frame=frame, timestamp=timestamp if timestamp is not None else time.time())
+        )
 
     def frames(self) -> list[BufferedFrame]:
         """A chronological snapshot of everything currently buffered.

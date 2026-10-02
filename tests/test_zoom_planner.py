@@ -19,8 +19,11 @@ def _centered_box(bw, bh, frame=FRAME):
 class TestZoomPlanner(unittest.TestCase):
     def setUp(self):
         self.cfg = ZoomPlanConfig(
-            far_fill_ratio=0.25, target_fill_ratio=0.5, max_optical_magnification=4.0,
-            min_useful_magnification=1.5, edge_margin_ratio=0.1,
+            far_fill_ratio=0.25,
+            target_fill_ratio=0.5,
+            max_optical_magnification=4.0,
+            min_useful_magnification=1.5,
+            edge_margin_ratio=0.1,
         )
 
     def test_close_animal_is_not_zoomed(self):

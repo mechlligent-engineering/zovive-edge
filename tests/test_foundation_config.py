@@ -12,6 +12,7 @@ from unittest import mock
 
 import yaml
 
+from tests.helpers import TEST_CAMERA_ENV
 from utils.config_loader import (
     AppConfig,
     ConfigError,
@@ -39,7 +40,8 @@ class ConfigTestCase(unittest.TestCase):
         self.config_dir.mkdir()
         for name in CORE_FILES:
             shutil.copy(REPO_CONFIGS / name, self.config_dir / name)
-        self.env: dict[str, str] = {}
+        # camera.yaml requires camera credentials from the environment.
+        self.env: dict[str, str] = dict(TEST_CAMERA_ENV)
 
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -92,7 +94,7 @@ class ValidConfigTests(ConfigTestCase):
         self.assertEqual(cfg.warnings, ())
 
     def test_real_repo_directory_is_valid(self):
-        cfg = load_config(REPO_CONFIGS, env={})
+        cfg = load_config(REPO_CONFIGS, env=TEST_CAMERA_ENV)
         self.assertEqual(cfg.config_dir, REPO_CONFIGS)
 
     def test_relative_paths_resolve_against_base_and_storage_root(self):
@@ -102,7 +104,13 @@ class ValidConfigTests(ConfigTestCase):
         self.assertEqual(cfg.storage.image_dir, cfg.storage.root / "snapshots")
 
     def test_env_interpolation_overrides_defaults(self):
-        self.env.update(ZOVIVE_BASE_STATION_IP="10.0.0.5", ZOVIVE_BASE_STATION_PORT="9443", ZOVIVE_CAMERA_PASSWORD="s3cret")
+        # nosec B106: "s3cret" is a fake test credential, not a real secret; the
+        # test checks that ${ZOVIVE_CAMERA_PASSWORD} is interpolated into the URL.
+        self.env.update(
+            ZOVIVE_BASE_STATION_IP="10.0.0.5",
+            ZOVIVE_BASE_STATION_PORT="9443",
+            ZOVIVE_CAMERA_PASSWORD="s3cret",
+        )  # nosec B106
         cfg = self.load()
         self.assertEqual(cfg.network.base_url, "http://10.0.0.5:9443")
         self.assertIn("s3cret", cfg.camera.rtsp_url)
@@ -120,7 +128,9 @@ class ValidConfigTests(ConfigTestCase):
             cfg.node.raw["node_id"] = "x"  # type: ignore[index]
 
     def test_credentials_never_appear_in_repr_or_summary(self):
-        self.env["ZOVIVE_CAMERA_PASSWORD"] = "s3cret"
+        # nosec B105: fake test credential; the test needs a known value to prove
+        # it is redacted from repr() and summary().
+        self.env["ZOVIVE_CAMERA_PASSWORD"] = "s3cret"  # nosec B105
         cfg = self.load()
         self.assertNotIn("s3cret", repr(cfg.camera))
         self.assertNotIn("s3cret", str(cfg.summary()))
@@ -328,7 +338,9 @@ class ExtensionTests(ConfigTestCase):
     def test_extension_validation_errors_are_aggregated(self):
         self.write("watchdog.yaml", "interval_sec: -1\n")
         spec = SectionSpec("watchdog", "watchdog.yaml", self.parse_watchdog)
-        self.assertIssue(self.load_error(extra_sections=[spec]), "watchdog.yaml", "interval_sec", IssueKind.INVALID_VALUE)
+        self.assertIssue(
+            self.load_error(extra_sections=[spec]), "watchdog.yaml", "interval_sec", IssueKind.INVALID_VALUE
+        )
 
     def test_crashing_parser_is_reported_not_raised_raw(self):
         def broken(r, ctx):

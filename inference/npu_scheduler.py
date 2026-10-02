@@ -62,9 +62,7 @@ class NpuScheduler:
                 "calls": self._stats.calls,
                 "avg_latency_ms_recent": round(avg_recent * 1000, 2),
                 "avg_latency_ms_overall": round(
-                    (self._stats.total_latency_sec / self._stats.calls * 1000)
-                    if self._stats.calls
-                    else 0.0,
+                    (self._stats.total_latency_sec / self._stats.calls * 1000) if self._stats.calls else 0.0,
                     2,
                 ),
             }

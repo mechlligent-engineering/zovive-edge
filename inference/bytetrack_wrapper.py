@@ -101,7 +101,7 @@ class IouTracker:
             track.age_since_seen = 0
             track.last_seen_ts = now
             track.presence_history.append(True)
-            track.presence_history = track.presence_history[-self.presence_window:]
+            track.presence_history = track.presence_history[-self.presence_window :]
             if track.hits >= self.min_hits_to_confirm:
                 track.confirmed = True
             matched_track_ids.add(tid)
@@ -135,7 +135,7 @@ class IouTracker:
                 continue
             track.age_since_seen += 1
             track.presence_history.append(False)
-            track.presence_history = track.presence_history[-self.presence_window:]
+            track.presence_history = track.presence_history[-self.presence_window :]
             if track.age_since_seen > self.max_age_frames:
                 dead_ids.append(tid)
         for tid in dead_ids:

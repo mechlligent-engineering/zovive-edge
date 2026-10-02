@@ -12,6 +12,13 @@ the base station is NAKing - check the protocol version on both sides.
 been down; if acked artifacts are not being purged, `purge_service` is failing - check
 `purge.log` and the journal table.
 
+**Detection restarting.** The heartbeat's `edge.restarts` shows it: `thread_restarts`
+(a worker crashed and was restarted in-process), `process_starts` and `last_exit_reason`
+(the whole process was restarted). On the node: `journalctl -u zovive-detect | grep -E
+"worker crashed|escalating|watchdog"` and `cat /var/lib/zovive/restart_history.json`. A
+steadily rising `process_starts` with the same reason is a real fault to fix, not noise;
+see `docs/WATCHDOG.md` for what each reason means.
+
 **Thermal throttling.** `utils/thermal_monitor.py --report`. Sustained throttling in an
 enclosure means the heatsink or airflow is wrong; the software cannot fix it.
 

@@ -61,7 +61,9 @@ class TestVideoPipelineIntegration(unittest.TestCase):
 
     def test_confirmed_track_produces_image_alert_and_uploaded_video(self):
         detection_queue = DetectionQueue(maxsize=20)
-        tracker = IouTracker(iou_match_threshold=0.3, max_age_frames=15, min_hits_to_confirm=1, presence_window=5)
+        tracker = IouTracker(
+            iou_match_threshold=0.3, max_age_frames=15, min_hits_to_confirm=1, presence_window=5
+        )
         gate = Stage1Gate(Stage1Config(min_hits_in_window=3, window_size=5, track_alert_cooldown_sec=300.0))
         track_sm = TrackStateMachine(gate)
         zone_filter = ZoneFilter({"zones": {}})
@@ -69,7 +71,9 @@ class TestVideoPipelineIntegration(unittest.TestCase):
         snapshot_store = BestSnapshotStore()
         evidence_store = EvidenceStore(snapshot_dir=paths.SNAPSHOT_DIR)
         alert_queue = AlertQueue()
-        node_cfg = {"node": {"camera_id": "cam01", "camera_name": "Test Cam", "forest_name": "Test Forest", "gps": {}}}
+        node_cfg = {
+            "node": {"camera_id": "cam01", "camera_name": "Test Cam", "forest_name": "Test Forest", "gps": {}}
+        }
         dispatcher = AlertDispatcher(alert_queue, evidence_store=evidence_store, node_config=node_cfg)
         classifier = AlwaysClassifier("tiger", 0.92)
         zoom = self._build_zoom()
@@ -103,7 +107,9 @@ class TestVideoPipelineIntegration(unittest.TestCase):
         now = time.time()
         for i in range(5):
             detection_queue.put(
-                DetectionBatch(seq=i, timestamp=now + i * 0.05, frame=frame, detections=[det], camera_id="cam01")
+                DetectionBatch(
+                    seq=i, timestamp=now + i * 0.05, frame=frame, detections=[det], camera_id="cam01"
+                )
             )
 
         stop_event = threading.Event()
@@ -117,7 +123,9 @@ class TestVideoPipelineIntegration(unittest.TestCase):
             motion_gate,
             snapshot_store,
             dispatcher,
-            inf_cfg={"classifier": {"max_crops_per_track": 5, "min_confidence": 0.5, "voting_strategy": "average"}},
+            inf_cfg={
+                "classifier": {"max_crops_per_track": 5, "min_confidence": 0.5, "voting_strategy": "average"}
+            },
             model_version="test-v1",
             stop_event=stop_event,
             max_cycles=5,

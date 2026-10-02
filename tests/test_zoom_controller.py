@@ -25,8 +25,12 @@ class TestAnimalZoomController(unittest.TestCase):
         self.cam = FakeLensCamera()
         self.clock = FakeClock()
         self.zoom = AnimalZoomController(
-            self.cam, zoom_settle_sec=2.0, focus_settle_sec=1.0, zoomed_timeout_sec=5.0,
-            suppress_realert_sec=30.0, clock=self.clock,
+            self.cam,
+            zoom_settle_sec=2.0,
+            focus_settle_sec=1.0,
+            zoomed_timeout_sec=5.0,
+            suppress_realert_sec=30.0,
+            clock=self.clock,
         )
 
     def _engage(self):
@@ -104,7 +108,9 @@ class TestAnimalZoomController(unittest.TestCase):
     def test_camera_only_receives_zoom_and_focus_commands(self):
         self._to_zoomed()
         self.zoom.complete("evt-1", "tiger", 0.9)
-        self.assertTrue({name for name, _ in self.cam.call_log} <= {"zoom_to", "trigger_autofocus", "stop_zoom"})
+        self.assertTrue(
+            {name for name, _ in self.cam.call_log} <= {"zoom_to", "trigger_autofocus", "stop_zoom"}
+        )
 
     def test_from_config(self):
         zoom = AnimalZoomController.from_config(

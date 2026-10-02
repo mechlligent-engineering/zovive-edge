@@ -16,10 +16,10 @@ import logging
 import numpy as np
 
 import paths
-from config_loader import load
 from db.outbox import EventRecord, insert_event
 from queues.alert_queue import AlertPayload, AlertQueue
 from storage.evidence_store import EvidenceStore
+from utils.config_loader import load
 
 log = logging.getLogger(__name__)
 

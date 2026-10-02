@@ -4,6 +4,7 @@ Blueprint Section 4.2: for N>=2 animals, Xmin=min(x1), Ymin=min(y1),
 Xmax=max(x2), Ymax=max(y2). Slicing per animal would re-run the NPU N times over
 largely the same pixels; one cluster box drops a 20-tile job to 2-4 tiles.
 """
+
 from __future__ import annotations
 
 import numpy as np

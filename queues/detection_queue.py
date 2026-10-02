@@ -13,9 +13,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import paths
-from config_loader import load
 from inference.base import Detection
 from queues.queue_monitor import BoundedDropOldestQueue
+from utils.config_loader import load
 
 
 @dataclass

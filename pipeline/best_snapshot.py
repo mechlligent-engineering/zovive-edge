@@ -40,7 +40,7 @@ class BestSnapshotTracker:
             return
         sharpness = sharpness_score(crop)
         area = crop.shape[0] * crop.shape[1]
-        score = sharpness * (area ** 0.5)  # sqrt(area) so huge blurry crops don't dominate
+        score = sharpness * (area**0.5)  # sqrt(area) so huge blurry crops don't dominate
         self._crops.append(ScoredCrop(crop=crop, full_frame=full_frame, score=score, sharpness=sharpness))
         self._crops.sort(key=lambda c: c.score, reverse=True)
         self._crops = self._crops[: self.keep_top_k]

@@ -18,7 +18,9 @@ class _RetryEntry:
 
 
 class TransferState:
-    def __init__(self, initial_backoff_sec: float = 2.0, max_backoff_sec: float = 300.0, multiplier: float = 2.0):
+    def __init__(
+        self, initial_backoff_sec: float = 2.0, max_backoff_sec: float = 300.0, multiplier: float = 2.0
+    ):
         self.initial = initial_backoff_sec
         self.max = max_backoff_sec
         self.multiplier = multiplier

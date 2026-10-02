@@ -8,13 +8,20 @@ place" bugs.
 Flow: cluster ROI -> compute_tiles -> crop each tile -> batch to NPU ->
       remap_tile_detections -> merge_detections (NMS).
 """
+
 from __future__ import annotations
 
 import numpy as np
 
 
-def compute_tiles(width: int, height: int, tile_w: int = 640, tile_h: int = 640,
-                  overlap_w: float = 0.2, overlap_h: float = 0.2):
+def compute_tiles(
+    width: int,
+    height: int,
+    tile_w: int = 640,
+    tile_h: int = 640,
+    overlap_w: float = 0.2,
+    overlap_h: float = 0.2,
+):
     """Tile origins covering a WxH region. Returns [(x0, y0, x1, y1), ...].
 
     Overlap exists so an animal straddling a tile edge is whole in at least one
@@ -30,7 +37,7 @@ def compute_tiles(width: int, height: int, tile_w: int = 640, tile_h: int = 640,
         if total <= tile:
             return [0]
         pts = list(range(0, total - tile + 1, step))
-        if pts[-1] + tile < total:      # always cover the far edge
+        if pts[-1] + tile < total:  # always cover the far edge
             pts.append(total - tile)
         return pts
 

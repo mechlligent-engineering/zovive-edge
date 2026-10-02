@@ -1,0 +1,13 @@
+# Project-level Bandit settings. `bandit -r .` picks this file up
+# automatically; CI also passes it explicitly with --ini.
+#
+# Only third-party / tooling directories are excluded. Application code
+# AND tests/ are scanned with every check enabled; individual false
+# positives are suppressed inline with `# nosec BXXX` plus a comment
+# explaining why.
+#
+# `exclude` replaces Bandit's built-in default list, so the defaults
+# (.svn, CVS, .bzr, .hg, .git, __pycache__, .tox, .eggs, *.egg) are
+# repeated here alongside the local virtualenvs.
+[bandit]
+exclude = ./.venv,./venv,./.svn,./CVS,./.bzr,./.hg,./.git,./__pycache__,./.tox,./.eggs,*.egg

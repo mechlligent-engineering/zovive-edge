@@ -2,15 +2,29 @@
 Description=ZOVIVE detection pipeline
 After=network-online.target var-lib-zovive.mount data.mount
 Wants=network-online.target
+# Never stop retrying: an unattended forest node has no one to run
+# `systemctl reset-failed`. RestartSec below keeps the retry rate low.
+StartLimitIntervalSec=0
 
 [Service]
-Type=simple
+# edge_main.py sends READY=1 once its worker threads are running, then
+# WATCHDOG=1 every ~0.5 s from its supervisor loop (watchdog/sd_notify.py).
+Type=notify
+NotifyAccess=main
+# No ping for 30 s = the main/supervisor thread itself is stuck: systemd
+# sends SIGABRT and restarts the service. Hung worker threads are caught
+# sooner by the in-process supervisor (hang_threshold_sec in
+# configs/watchdog_config.yaml). See docs/WATCHDOG.md.
+WatchdogSec=30
+# Model load + warmup (CPU fallback included) must finish within this.
+TimeoutStartSec=180
+TimeoutStopSec=30
 User=zovive
 WorkingDirectory=/opt/zovive
 EnvironmentFile=/opt/zovive/.env
 ExecStart=/opt/zovive/.venv/bin/python edge_main.py
 Restart=always
-RestartSec=3
+RestartSec=30
 # a detection crash must not take the uploader down with it
 OOMPolicy=continue
 

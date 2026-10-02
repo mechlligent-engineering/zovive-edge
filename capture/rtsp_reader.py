@@ -22,10 +22,12 @@ import cv2
 import paths
 from capture.reconnect import ReconnectPolicy
 from capture.stream_health import StreamHealth
-from config_loader import load
 from queues.frame_queue import LatestFrameSlot
+from utils.config_loader import load
 
 log = logging.getLogger(__name__)
+
+_FFMPEG_TIMEOUT_MSEC = 10_000
 
 
 def _build_url(template: str, host: str, user: str, password: str) -> str:
@@ -43,24 +45,21 @@ class RtspReader:
         self.camera_id = camera_id
         self.cfg = config or load(paths.RTSP_CONFIG)
         cam = self.cfg.get("camera", {})
-        self.sub_url = _build_url(
-            cam["sub_stream"]["url"], cam["host"], cam["username"], cam["password"]
-        )
-        self.main_url = _build_url(
-            cam["main_stream"]["url"], cam["host"], cam["username"], cam["password"]
-        )
+        self.sub_url = _build_url(cam["sub_stream"]["url"], cam["host"], cam["username"], cam["password"])
+        self.main_url = _build_url(cam["main_stream"]["url"], cam["host"], cam["username"], cam["password"])
         stall_timeout = float(self.cfg.get("reconnect", {}).get("stall_timeout_sec", 5.0))
         self.health = StreamHealth(camera_id, stall_timeout_sec=stall_timeout)
         self._reconnect_policy = ReconnectPolicy.from_config(self.cfg)
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._target_interval = 1.0 / float(cam["sub_stream"].get("target_fps", 8))
+        # Wall-clock time of the latest loop iteration, connected or not;
+        # watchdog/supervisor.py uses it to tell "stuck" from "camera down".
+        self.loop_ts: float | None = None
 
     def start(self) -> None:
         self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._run, name=f"rtsp-reader-{self.camera_id}", daemon=True
-        )
+        self._thread = threading.Thread(target=self.run, name=f"rtsp-reader-{self.camera_id}", daemon=True)
         self._thread.start()
 
     def stop(self, join_timeout: float = 5.0) -> None:
@@ -69,7 +68,14 @@ class RtspReader:
             self._thread.join(timeout=join_timeout)
 
     def _open_capture(self) -> cv2.VideoCapture | None:
-        cap = cv2.VideoCapture(self.sub_url, cv2.CAP_FFMPEG)
+        # Bound FFmpeg's open/read so an unreachable camera returns within
+        # ~10 s instead of blocking on the OS TCP timeout (~2 min), which
+        # would otherwise look like a hung thread to the supervisor.
+        params = []
+        for prop in ("CAP_PROP_OPEN_TIMEOUT_MSEC", "CAP_PROP_READ_TIMEOUT_MSEC"):
+            if hasattr(cv2, prop):
+                params += [getattr(cv2, prop), _FFMPEG_TIMEOUT_MSEC]
+        cap = cv2.VideoCapture(self.sub_url, cv2.CAP_FFMPEG, params)
         # Keep OpenCV's internal buffer at 1 frame so we never read stale
         # frames it queued up internally while we were busy elsewhere.
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -78,12 +84,25 @@ class RtspReader:
             return None
         return cap
 
-    def _run(self) -> None:
-        cap = None
+    def run(self) -> None:
+        """The capture loop. start() runs it on a private thread;
+        edge_main.py runs it under watchdog/supervisor.py instead."""
+        # The open capture lives in a one-item list so it is released here
+        # even when _loop raises, instead of leaking an FFmpeg handle per crash.
+        cap_holder: list = [None]
+        try:
+            self._loop(cap_holder)
+        finally:
+            if cap_holder[0] is not None:
+                cap_holder[0].release()
+
+    def _loop(self, cap_holder: list) -> None:
         last_frame_time = 0.0
         while not self._stop_event.is_set():
+            self.loop_ts = time.time()
+            cap = cap_holder[0]
             if cap is None:
-                cap = self._open_capture()
+                cap = cap_holder[0] = self._open_capture()
                 if cap is None:
                     delay = self._reconnect_policy.sleep_next()
                     log.warning(
@@ -105,16 +124,13 @@ class RtspReader:
             if not ok or frame is None:
                 log.warning("rtsp read failed, reconnecting", extra={"camera_id": self.camera_id})
                 cap.release()
-                cap = None
+                cap_holder[0] = None
                 self.health.record_stall()
                 continue
 
             last_frame_time = time.monotonic()
             self.health.record_frame()
             self.frame_slot.put(frame, camera_id=self.camera_id)
-
-        if cap is not None:
-            cap.release()
 
     def grab_main_stream_frame(self, timeout_sec: float = 3.0):
         """One-shot high-res grab from the main stream, used on trigger

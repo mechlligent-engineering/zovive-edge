@@ -14,7 +14,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import config_loader
 import paths
 from db.init_db import init_db
 from db.outbox import (
@@ -27,6 +26,7 @@ from db.outbox import (
 from network.base_station_client import BaseStationError
 from network.transfer_state import TransferState
 from transfer_main import _send_pending_images, _send_pending_videos, run
+from utils import config_loader
 
 
 class _FakeImageClient:
@@ -119,7 +119,11 @@ class TestDeleteVideoAfterAck(unittest.TestCase):
         self.video_path.write_bytes(b"fake-mp4-bytes")
         self.event_id = insert_event(
             EventRecord(
-                track_id="t1", camera_id="cam01", animal_name="tiger", confidence=0.9, snapshot_path="/tmp/x.jpg"
+                track_id="t1",
+                camera_id="cam01",
+                animal_name="tiger",
+                confidence=0.9,
+                snapshot_path="snapshots/x.jpg",
             )
         )
         set_video_path(self.event_id, str(self.video_path))

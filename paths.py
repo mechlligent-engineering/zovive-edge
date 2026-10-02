@@ -57,6 +57,12 @@ DB_PATH = DB_DIR / "zovive.sqlite3"
 
 SNAPSHOT_DIR = DATA_ROOT / "snapshots"
 CLIP_DIR = DATA_ROOT / "clips"
+# Written by edge_main.py every few seconds, read by health_main.py
+# (watchdog/edge_status.py).
+EDGE_STATUS_PATH = DATA_ROOT / "edge_status.json"
+# edge_main.py process starts and why the previous run ended
+# (watchdog/restart_history.py); survives systemd restarts.
+RESTART_HISTORY_PATH = DATA_ROOT / "restart_history.json"
 LOG_DIR = DATA_ROOT / "logs"
 CACHE_DIR = DATA_ROOT / "cache"
 QUARANTINE_DIR = DATA_ROOT / "quarantine"  # files that failed validation

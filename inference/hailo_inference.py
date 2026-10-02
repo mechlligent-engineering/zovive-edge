@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 def _import_hailo():
     try:
         import hailo_platform as hpf  # type: ignore
+
         return hpf
     except ImportError as exc:
         raise InferenceBackendError(

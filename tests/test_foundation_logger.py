@@ -137,7 +137,11 @@ class SetupTests(LoggerTestCase):
 
     def test_env_overrides(self):
         s = LoggingSettings.from_env(
-            {"ZOVIVE_LOG_DIR": str(self.tmp / "envlogs"), "ZOVIVE_LOG_LEVEL": "debug", "ZOVIVE_LOG_FILE": "n.log"}
+            {
+                "ZOVIVE_LOG_DIR": str(self.tmp / "envlogs"),
+                "ZOVIVE_LOG_LEVEL": "debug",
+                "ZOVIVE_LOG_FILE": "n.log",
+            }
         )
         self.assertEqual(s.log_file, self.tmp / "envlogs" / "n.log")
         self.assertEqual(s.level, "debug")
@@ -190,7 +194,10 @@ class RotationTests(LoggerTestCase):
         self.assertEqual(names, ["edge.log", "edge.log.1", "edge.log.2"])
 
     def test_time_and_none_modes_build(self):
-        for mode, cls in ((RotationMode.TIME, logging.handlers.TimedRotatingFileHandler), (RotationMode.NONE, logging.FileHandler)):
+        for mode, cls in (
+            (RotationMode.TIME, logging.handlers.TimedRotatingFileHandler),
+            (RotationMode.NONE, logging.FileHandler),
+        ):
             setup_logging(self.settings(rotation=RotationSettings(mode=mode)))
             handlers = [h for h in logging.getLogger("zovive").handlers if isinstance(h, logging.FileHandler)]
             self.assertEqual(len(handlers), 1)

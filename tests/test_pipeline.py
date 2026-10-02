@@ -53,7 +53,9 @@ class TestPipelineIntegration(unittest.TestCase):
 
     def test_consistent_tiger_detections_produce_one_event(self):
         detection_queue = DetectionQueue(maxsize=20)
-        tracker = IouTracker(iou_match_threshold=0.3, max_age_frames=15, min_hits_to_confirm=1, presence_window=5)
+        tracker = IouTracker(
+            iou_match_threshold=0.3, max_age_frames=15, min_hits_to_confirm=1, presence_window=5
+        )
         gate = Stage1Gate(Stage1Config(min_hits_in_window=3, window_size=5, track_alert_cooldown_sec=300.0))
         track_sm = TrackStateMachine(gate)
         zone_filter = ZoneFilter({"zones": {}})
@@ -61,7 +63,9 @@ class TestPipelineIntegration(unittest.TestCase):
         snapshot_store = BestSnapshotStore()
         evidence_store = EvidenceStore(snapshot_dir=paths.SNAPSHOT_DIR)
         alert_queue = AlertQueue()
-        node_cfg = {"node": {"camera_id": "cam01", "camera_name": "Test Cam", "forest_name": "Test Forest", "gps": {}}}
+        node_cfg = {
+            "node": {"camera_id": "cam01", "camera_name": "Test Cam", "forest_name": "Test Forest", "gps": {}}
+        }
         dispatcher = AlertDispatcher(alert_queue, evidence_store=evidence_store, node_config=node_cfg)
         classifier = AlwaysClassifier("tiger", 0.92)
         zoom = self._build_zoom()
@@ -110,18 +114,32 @@ class TestPipelineIntegration(unittest.TestCase):
         motion_gate = MotionGate()
         snapshot_store = BestSnapshotStore()
         evidence_store = EvidenceStore(snapshot_dir=paths.SNAPSHOT_DIR)
-        dispatcher = AlertDispatcher(AlertQueue(), evidence_store=evidence_store, node_config={"node": {"camera_id": "cam01"}})
+        dispatcher = AlertDispatcher(
+            AlertQueue(), evidence_store=evidence_store, node_config={"node": {"camera_id": "cam01"}}
+        )
         classifier = AlwaysClassifier("tiger", 0.92)
         zoom = self._build_zoom()
         frame = blank_frame(320, 240)
 
         for i in range(5):
-            detection_queue.put(DetectionBatch(seq=i, timestamp=float(i), frame=frame, detections=[], camera_id="cam01"))
+            detection_queue.put(
+                DetectionBatch(seq=i, timestamp=float(i), frame=frame, detections=[], camera_id="cam01")
+            )
 
         _pipeline_loop(
-            detection_queue, classifier, zoom, tracker, track_sm, zone_filter, motion_gate,
-            snapshot_store, dispatcher, inf_cfg={"classifier": {"max_crops_per_track": 5, "min_confidence": 0.5}},
-            model_version="test-v1", stop_event=threading.Event(), max_cycles=5,
+            detection_queue,
+            classifier,
+            zoom,
+            tracker,
+            track_sm,
+            zone_filter,
+            motion_gate,
+            snapshot_store,
+            dispatcher,
+            inf_cfg={"classifier": {"max_crops_per_track": 5, "min_confidence": 0.5}},
+            model_version="test-v1",
+            stop_event=threading.Event(),
+            max_cycles=5,
         )
 
         self.assertEqual(get_pending(limit=10), [])

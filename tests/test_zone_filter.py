@@ -21,7 +21,9 @@ class TestZoneFilter(unittest.TestCase):
         # polygon covering the left half of the frame (normalized coords)
         polygon = [[0.0, 0.0], [0.5, 0.0], [0.5, 1.0], [0.0, 1.0]]
         zf = ZoneFilter({"zones": {"north": [polygon]}})
-        inside = Detection(box=(0, 0, 20, 20), score=0.9, class_id=0, class_name="deer")  # center ~(10,10)/100
+        inside = Detection(
+            box=(0, 0, 20, 20), score=0.9, class_id=0, class_name="deer"
+        )  # center ~(10,10)/100
         kept = zf.filter([inside], "north", (100, 100))
         self.assertEqual(len(kept), 1)
 

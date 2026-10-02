@@ -29,7 +29,9 @@ def _event_filename(camera_id: str, track_id: str, event_id: str, ts: float) -> 
 
 
 class EvidenceStore:
-    def __init__(self, snapshot_dir: Path | None = None, max_bytes: int | None = None, jpeg_quality: int = 90):
+    def __init__(
+        self, snapshot_dir: Path | None = None, max_bytes: int | None = None, jpeg_quality: int = 90
+    ):
         self.snapshot_dir = snapshot_dir or paths.SNAPSHOT_DIR
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
         # None = no cap enforced here (leave it to storage/disk_guard.py in batch 2).

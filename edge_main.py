@@ -26,7 +26,10 @@ talks to the network directly except through the DB outbox.
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import signal
+import sys
 import threading
 import time
 
@@ -36,7 +39,6 @@ from camera_control.mode_manager import ModeManager
 from camera_control.zoom_controller import WIDE_VIEW, ZOOMED_VIEW, AnimalZoomController, ZoomState
 from capture.file_source import FileFrameSource
 from capture.rtsp_reader import RtspReader
-from config_loader import load
 from db.init_db import init_db
 from db.migrations import migrate
 from db.outbox import set_video_path
@@ -57,10 +59,23 @@ from pipeline.zone_filter import ZoneFilter
 from queues.alert_queue import AlertQueue
 from queues.detection_queue import DetectionBatch, DetectionQueue
 from queues.frame_queue import LatestFrameSlot
+from queues.queue_monitor import snapshot as queues_snapshot
+from utils.config_loader import ConfigError, load
+from watchdog import sd_notify
+from watchdog.edge_status import EdgeStatus, write_status_file
+from watchdog.restart_history import record_exit, record_start
+from watchdog.supervisor import RestartPolicy, SupervisedThread, Supervisor
 
 log = get_logger(__name__)
 
 _shutdown_event = threading.Event()
+
+EXIT_OK = 0
+# A worker hung or ran out of restarts; systemd (Restart=always) restarts us.
+EXIT_SUPERVISOR = 70
+# Configuration invalid, e.g. ZOVIVE_CAMERA_USERNAME/PASSWORD missing (sysexits EX_CONFIG).
+EXIT_CONFIG = 78
+SUPERVISOR_POLL_SEC = 0.5
 
 
 def _handle_signal(signum, frame):  # noqa: ARG001
@@ -142,22 +157,35 @@ def _inference_loop(
     camera_id: str,
     stop_event: threading.Event,
     max_cycles: int | None = None,
+    status: EdgeStatus | None = None,
 ) -> None:
     last_seq = 0
     cycles = 0
     while not stop_event.is_set():
+        if status is not None:
+            status.inference_loop_tick()
         env = frame_slot.wait_for_next(last_seq, timeout=1.0)
         if env is None:
             continue
         last_seq = env.seq
+        if status is not None:
+            status.frame_received()
         try:
             detections = detector.infer(env.frame)
         except Exception:
             log.exception("detector.infer failed; skipping frame")
+            if status is not None:
+                status.inference_failed()
             continue
+        if status is not None:
+            status.inference_ok(len(detections))
         detection_queue.put(
             DetectionBatch(
-                seq=env.seq, timestamp=env.timestamp, frame=env.frame, detections=detections, camera_id=camera_id
+                seq=env.seq,
+                timestamp=env.timestamp,
+                frame=env.frame,
+                detections=detections,
+                camera_id=camera_id,
             )
         )
         cycles += 1
@@ -193,7 +221,9 @@ def _classify_and_dispatch(
     return result, event_id
 
 
-def _reset_tracking(tracker: IouTracker, track_sm: TrackStateMachine, snapshot_store: BestSnapshotStore) -> None:
+def _reset_tracking(
+    tracker: IouTracker, track_sm: TrackStateMachine, snapshot_store: BestSnapshotStore
+) -> None:
     """The lens is moving: every box from the previous view is meaningless."""
     tracker.reset()
     track_sm.sweep_lost(set())
@@ -216,11 +246,15 @@ def _pipeline_loop(
     stop_event: threading.Event,
     max_cycles: int | None = None,
     clip_extractor: ClipExtractor | None = None,
+    status: EdgeStatus | None = None,
 ) -> None:
     cls_cfg = inf_cfg["classifier"]
     max_crops = int(cls_cfg.get("max_crops_per_track", 5))
     cycles = 0
     while not stop_event.is_set():
+        if status is not None:
+            # Every iteration, idle or not: a stale tick means this thread is stuck or dead.
+            status.pipeline_tick(zoom_state=zoom.state.value)
         batch = detection_queue.get(timeout=1.0)
         if batch is None:
             continue
@@ -239,8 +273,14 @@ def _pipeline_loop(
             # evidence captured when the zoom started.
             snapshot = expired.wide_frame if expired.wide_frame is not None else batch.frame
             result, event_id = _classify_and_dispatch(
-                classifier, cls_cfg, expired.wide_crops, snapshot, expired.track_id,
-                dispatcher, WIDE_VIEW, model_version,
+                classifier,
+                cls_cfg,
+                expired.wide_crops,
+                snapshot,
+                expired.track_id,
+                dispatcher,
+                WIDE_VIEW,
+                model_version,
             )
             zoom.complete(event_id, result.species, result.confidence)
             if event_id and clip_extractor is not None:
@@ -260,6 +300,8 @@ def _pipeline_loop(
         detections = zone_filter.filter(batch.detections, view, frame_shape)
 
         tracks = tracker.update(detections)
+        if status is not None:
+            status.pipeline_tick(active_tracks=len(tracks))
         active_ids = {t.track_id for t in tracks}
         track_sm.sweep_lost(active_ids)
         for tid in list(snapshot_store.active_track_ids()):
@@ -281,7 +323,9 @@ def _pipeline_loop(
                 if known is not None:
                     # Same animal already handled before/while zooming, back
                     # under a new track id: don't re-zoom or re-alert it.
-                    track_sm.mark_classified(track.track_id, known.species or track.class_name, known.confidence)
+                    track_sm.mark_classified(
+                        track.track_id, known.species or track.class_name, known.confidence
+                    )
                     if known.event_id:
                         track_sm.mark_alerted(track.track_id, known.event_id)
                     continue
@@ -310,7 +354,9 @@ def _pipeline_loop(
             if event_id:
                 track_sm.mark_alerted(track.track_id, event_id)
                 if clip_extractor is not None:
-                    clip_extractor.start(event_id=event_id, track_id=track.track_id, camera_id=batch.camera_id)
+                    clip_extractor.start(
+                        event_id=event_id, track_id=track.track_id, camera_id=batch.camera_id
+                    )
 
             if view == ZOOMED_VIEW and zoom.state == ZoomState.ZOOMED:
                 # Final zoomed snapshot stored: zoom back out.
@@ -330,8 +376,23 @@ def _pipeline_loop(
     log.info("pipeline loop stopped")
 
 
-def run(source_override: str | None = None, max_cycles: int | None = None) -> None:
+def run(source_override: str | None = None, max_cycles: int | None = None) -> int:
+    """Runs until shutdown. Returns the process exit code: EXIT_OK, or
+    EXIT_SUPERVISOR when a worker hung or used up its restarts."""
     configure_root("detect")
+    history = record_start(paths.RESTART_HISTORY_PATH, time.time())
+    try:
+        return _run(history, source_override, max_cycles)
+    except BaseException as exc:
+        # Startup failures (missing model, bad config) and anything else that
+        # escapes: record why, then let it propagate (systemd restarts us).
+        if history.get("running"):
+            reason = f"fatal: {type(exc).__name__}: {exc}"[:300]
+            record_exit(paths.RESTART_HISTORY_PATH, history, reason, 1, time.time())
+        raise
+
+
+def _run(history: dict, source_override: str | None, max_cycles: int | None) -> int:
     conn = init_db()
     migrate(conn)
 
@@ -384,65 +445,132 @@ def run(source_override: str | None = None, max_cycles: int | None = None) -> No
     # how alert_dispatcher.py owns the actual insert_event() call.
     clip_extractor = ClipExtractor(on_clip_ready=set_video_path)
 
+    watchdog_cfg = load(paths.WATCHDOG_CONFIG, required=False).get("watchdog", {})
+    status_interval = max(1.0, float(watchdog_cfg.get("edge_status_write_interval_sec", 5)))
+    edge_status = EdgeStatus(camera_id)
+
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
-    capture.start()
+    def reset_pipeline() -> None:
+        # Runs on the main thread after the pipeline thread died, so nothing
+        # else is touching this state. A zoom in progress is dropped without
+        # an alert and the lens goes back to wide.
+        _reset_tracking(tracker, track_sm, snapshot_store)
+        zoom.abort()
+
+    supervisor = Supervisor(RestartPolicy.from_config(watchdog_cfg))
+    supervisor.add(SupervisedThread("capture", capture.run, liveness=lambda: capture.loop_ts))
+    supervisor.add(
+        SupervisedThread(
+            "inference",
+            lambda: _inference_loop(
+                detector, frame_slot, detection_queue, camera_id, _shutdown_event, max_cycles, edge_status
+            ),
+            liveness=edge_status.inference_loop_ts,
+        )
+    )
+    supervisor.add(
+        SupervisedThread(
+            "pipeline",
+            lambda: _pipeline_loop(
+                detection_queue,
+                classifier,
+                zoom,
+                tracker,
+                track_sm,
+                zone_filter,
+                motion_gate,
+                snapshot_store,
+                dispatcher,
+                inf_cfg,
+                model_version,
+                _shutdown_event,
+                max_cycles,
+                clip_extractor,
+                edge_status,
+            ),
+            liveness=edge_status.pipeline_loop_ts,
+            on_restart=reset_pipeline,
+        )
+    )
+
+    supervisor.start_all()
     log.info("capture started", extra={"camera_id": camera_id, "backend": node_cfg["runtime"]["backend"]})
+    sd_notify.ready()
 
-    inference_thread = threading.Thread(
-        target=_inference_loop,
-        args=(detector, frame_slot, detection_queue, camera_id, _shutdown_event, max_cycles),
-        name="inference-loop",
-        daemon=True,
-    )
-    pipeline_thread = threading.Thread(
-        target=_pipeline_loop,
-        args=(
-            detection_queue,
-            classifier,
-            zoom,
-            tracker,
-            track_sm,
-            zone_filter,
-            motion_gate,
-            snapshot_store,
-            dispatcher,
-            inf_cfg,
-            model_version,
-            _shutdown_event,
-            max_cycles,
-            clip_extractor,
-        ),
-        name="pipeline-loop",
-        daemon=True,
-    )
-
-    inference_thread.start()
-    pipeline_thread.start()
-
+    reason, exit_code = "shutdown requested", EXIT_OK
     try:
-        if max_cycles is not None:
-            pipeline_thread.join()
-            _shutdown_event.set()
-            inference_thread.join(timeout=5.0)
-        else:
-            while not _shutdown_event.is_set():
-                time.sleep(0.5)
+        reason, exit_code = _supervise(
+            supervisor, edge_status, capture, history, status_interval, _shutdown_event
+        )
     finally:
         _shutdown_event.set()
+        sd_notify.stopping()
         capture.stop()
-        inference_thread.join(timeout=5.0)
-        pipeline_thread.join(timeout=5.0)
-        # Finish any in-progress event clips with whatever post-roll they
-        # have so far, rather than leaving them recording forever (the
-        # pipeline thread that was feeding them frames has now stopped).
-        clip_extractor.flush_all()
+        supervisor.join_all(timeout_each=5.0)
+        if exit_code == EXIT_OK:
+            # Finish in-progress event clips with whatever post-roll they
+            # have. Skipped when escalating: the process is about to be torn
+            # down and a half-written MP4 is worse than none.
+            clip_extractor.flush_all()
+            detector.close()
+            classifier.close()
+        # On escalation a hung worker may hold the NPU or a camera socket;
+        # closing those could hang too, so they are left to process exit.
         if zoom.state != ZoomState.WIDE:
             lens_camera.zoom_to(zoom.plan_config.wide_zoom_level)
-        detector.close()
-        classifier.close()
-        log.info("edge_main stopped cleanly")
+        _write_edge_status(edge_status, capture, supervisor, history)
+        record_exit(paths.RESTART_HISTORY_PATH, history, reason, exit_code, time.time())
+        log.info("edge_main stopped", extra={"reason": reason, "exit_code": exit_code})
+    return exit_code
+
+
+def _supervise(
+    supervisor: Supervisor,
+    edge_status: EdgeStatus,
+    capture,
+    history: dict,
+    status_interval: float,
+    stop_event: threading.Event,
+) -> tuple[str, int]:
+    """Main-thread loop: restart crashed workers, escalate hung or exhausted
+    ones, publish status, and keep the systemd watchdog fed. Returns
+    (reason, exit code)."""
+    next_status_write = 0.0
+    while not stop_event.is_set():
+        escalation = supervisor.check()
+        if escalation:
+            log.critical("supervisor escalating; exiting for systemd restart", extra={"reason": escalation})
+            return escalation, EXIT_SUPERVISOR
+        if supervisor.stopped("pipeline"):
+            return "pipeline finished (--max-cycles)", EXIT_OK
+        # Fed only while check() runs and finds nothing to escalate: if this
+        # thread hangs, systemd's WatchdogSec kills and restarts the process.
+        sd_notify.watchdog_ping()
+        if time.monotonic() >= next_status_write:
+            _write_edge_status(edge_status, capture, supervisor, history)
+            next_status_write = time.monotonic() + status_interval
+        stop_event.wait(SUPERVISOR_POLL_SEC)
+    return "shutdown requested", EXIT_OK
+
+
+def _write_edge_status(
+    edge_status: EdgeStatus, capture, supervisor: Supervisor | None = None, history: dict | None = None
+) -> None:
+    """Publish this process's health for health_main.py. A failed write
+    (disk full, permissions) is logged, never fatal: health_main reports
+    the resulting stale file as edge_process_alive = false."""
+    try:
+        snapshot = edge_status.snapshot(
+            stream=capture.health.snapshot(),
+            queues=queues_snapshot(),
+            supervisor=supervisor.snapshot() if supervisor else None,
+            process=history,
+        )
+        write_status_file(paths.EDGE_STATUS_PATH, snapshot)
+    except (OSError, TypeError, ValueError):
+        log.exception("failed to write edge status file", extra={"path": str(paths.EDGE_STATUS_PATH)})
 
 
 def main() -> None:
@@ -454,7 +582,21 @@ def main() -> None:
     )
     parser.add_argument("--max-cycles", type=int, default=None, help="stop after N pipeline cycles (testing)")
     args = parser.parse_args()
-    run(source_override=args.source, max_cycles=args.max_cycles)
+    try:
+        exit_code = run(source_override=args.source, max_cycles=args.max_cycles)
+    except ConfigError as exc:
+        # Missing camera credentials or a bad config file: one clear line
+        # naming the file, key and variable (never its value), no traceback.
+        log.critical(
+            "refusing to start: invalid configuration", extra={"problems": [str(i) for i in exc.issues]}
+        )
+        logging.shutdown()
+        sys.exit(EXIT_CONFIG)
+    if exit_code != EXIT_OK:
+        # os._exit, not sys.exit: a hung worker thread stuck in native code
+        # (Hailo, FFmpeg) can block normal interpreter shutdown.
+        logging.shutdown()
+        os._exit(exit_code)
 
 
 if __name__ == "__main__":

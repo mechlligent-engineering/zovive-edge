@@ -55,7 +55,10 @@ class TestBackendSelection(unittest.TestCase):
         # __init__ raises InferenceBackendError (see hailo_inference.py's
         # _import_hailo) instead of hailo_platform being importable.
         with (
-            patch("inference.hailo_inference.HailoDetector", side_effect=InferenceBackendError("no hailo_platform")),
+            patch(
+                "inference.hailo_inference.HailoDetector",
+                side_effect=InferenceBackendError("no hailo_platform"),
+            ),
             patch("edge_main.OnnxDetector") as mock_det,
             patch("edge_main.OnnxClassifier") as mock_cls,
         ):

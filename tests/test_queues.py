@@ -69,7 +69,7 @@ class TestDetectionAndAlertQueue(unittest.TestCase):
             camera_id="cam01",
             species="tiger",
             confidence=0.9,
-            snapshot_path="/tmp/x.jpg",
+            snapshot_path="snapshots/x.jpg",
             timestamp=time.time(),
         )
         q.put(payload)

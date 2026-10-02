@@ -44,7 +44,7 @@ class Stage1Gate:
         self._last_alert_ts: dict[str, float] = {}
 
     def presence_vote_passed(self, track: Track) -> bool:
-        window = track.presence_history[-self.config.window_size:]
+        window = track.presence_history[-self.config.window_size :]
         return sum(1 for v in window if v) >= self.config.min_hits_in_window
 
     def in_cooldown(self, track: Track, now: float | None = None) -> bool:

@@ -39,9 +39,7 @@ def decode_yolo_detections(
         if arr.shape[-1] == 4 + len(class_names):
             arr = arr.T
         else:
-            raise ValueError(
-                f"unexpected YOLO output shape {output.shape} for {len(class_names)} classes"
-            )
+            raise ValueError(f"unexpected YOLO output shape {output.shape} for {len(class_names)} classes")
 
     boxes_cxcywh = arr[0:4, :].T  # (N, 4)
     class_scores = arr[4:, :].T  # (N, num_classes)
@@ -63,9 +61,7 @@ def decode_yolo_detections(
     y1 = cy - h / 2
     boxes_xywh_for_nms = np.stack([x1, y1, w, h], axis=1)
 
-    indices = cv2.dnn.NMSBoxes(
-        boxes_xywh_for_nms.tolist(), scores.tolist(), conf_threshold, iou_threshold
-    )
+    indices = cv2.dnn.NMSBoxes(boxes_xywh_for_nms.tolist(), scores.tolist(), conf_threshold, iou_threshold)
     if len(indices) == 0:
         return []
     indices = np.array(indices).reshape(-1)

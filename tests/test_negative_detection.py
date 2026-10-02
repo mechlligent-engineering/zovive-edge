@@ -15,7 +15,9 @@ from pipeline.track_state_machine import TrackState, TrackStateMachine
 
 class TestNegativeDetection(unittest.TestCase):
     def setUp(self):
-        self.tracker = IouTracker(iou_match_threshold=0.3, max_age_frames=15, min_hits_to_confirm=1, presence_window=5)
+        self.tracker = IouTracker(
+            iou_match_threshold=0.3, max_age_frames=15, min_hits_to_confirm=1, presence_window=5
+        )
         self.gate = Stage1Gate(Stage1Config(min_hits_in_window=3, window_size=5))
         self.sm = TrackStateMachine(self.gate)
 

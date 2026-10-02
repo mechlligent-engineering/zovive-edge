@@ -7,11 +7,32 @@ classes natively.
 
 from __future__ import annotations
 
+import os
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from unittest import mock
 
 import numpy as np
 
 from inference.base import ClassificationResult, Classifier, Detection, Detector
+from utils import config_loader
+
+# Fake camera credentials for tests that load configs/rtsp_config.yaml or
+# camera.yaml, which require ZOVIVE_CAMERA_USERNAME/PASSWORD. Not real secrets.
+TEST_CAMERA_ENV = {"ZOVIVE_CAMERA_USERNAME": "test-user", "ZOVIVE_CAMERA_PASSWORD": "test-pass"}  # nosec B105
+
+
+@contextmanager
+def camera_credentials(env: dict[str, str] | None = None) -> Iterator[None]:
+    """Put fake camera credentials in os.environ. Clears the config_loader.load()
+    cache on entry and exit so interpolated values never leak into other tests."""
+    config_loader.clear_cache()
+    try:
+        with mock.patch.dict(os.environ, TEST_CAMERA_ENV if env is None else env):
+            yield
+    finally:
+        config_loader.clear_cache()
 
 
 def blank_frame(width: int = 320, height: int = 240) -> np.ndarray:
@@ -33,7 +54,15 @@ class ScriptedDetector(Detector):
     """
 
     def __init__(self, script: list[list[Detection]], class_names: list[str] | None = None):
-        self.class_names = class_names or ["deer", "gaur", "leopard", "elephant", "sloth_bear", "tiger", "wild_boar"]
+        self.class_names = class_names or [
+            "deer",
+            "gaur",
+            "leopard",
+            "elephant",
+            "sloth_bear",
+            "tiger",
+            "wild_boar",
+        ]
         self.script = script
         self._i = 0
         self.calls = 0
@@ -53,7 +82,15 @@ class AlwaysClassifier(Classifier):
     classifier accuracy."""
 
     def __init__(self, species: str, confidence: float, class_names: list[str] | None = None):
-        self.class_names = class_names or ["deer", "gaur", "leopard", "elephant", "sloth_bear", "tiger", "wild_boar"]
+        self.class_names = class_names or [
+            "deer",
+            "gaur",
+            "leopard",
+            "elephant",
+            "sloth_bear",
+            "tiger",
+            "wild_boar",
+        ]
         self.species = species
         self.confidence = confidence
 
@@ -80,7 +117,15 @@ class ScriptedClassifier(Classifier):
     """
 
     def __init__(self, script: list[ClassificationResult], class_names: list[str] | None = None):
-        self.class_names = class_names or ["deer", "gaur", "leopard", "elephant", "sloth_bear", "tiger", "wild_boar"]
+        self.class_names = class_names or [
+            "deer",
+            "gaur",
+            "leopard",
+            "elephant",
+            "sloth_bear",
+            "tiger",
+            "wild_boar",
+        ]
         self.script = script
         self._i = 0
 
