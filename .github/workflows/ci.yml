@@ -34,8 +34,10 @@ jobs:
       - name: Test (unittest)
         run: python -m unittest discover -s tests -v
 
+      # Settings live in .bandit (excludes only virtualenv/VCS dirs; tests/
+      # are scanned). Passed explicitly so discovery can't pick another file.
       - name: Security Scan (Bandit)
-        run: bandit -r .
+        run: bandit --ini .bandit -r .
 
       # Belt-and-suspenders: the whole suite also has to pass with the
       # stdlib runner alone, since that's what a Pi or a locked-down

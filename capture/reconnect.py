@@ -33,7 +33,8 @@ class ReconnectPolicy:
         """Return the delay (seconds) to wait before the next attempt,
         and advance the backoff for the attempt after that."""
         delay = self._current
-        jittered = delay * (1.0 + random.uniform(-self.jitter, self.jitter))
+        # Non-cryptographic retry jitter to prevent thundering herd reconnection spikes
+        jittered = delay * (1.0 + random.uniform(-self.jitter, self.jitter))  # nosec B311
         self.attempt_count += 1
         self._current = min(self._current * self.multiplier, self.max)
         return max(0.0, jittered)

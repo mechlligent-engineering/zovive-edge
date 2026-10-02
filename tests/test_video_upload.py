@@ -51,7 +51,7 @@ class TestVideoOutboxHelpers(unittest.TestCase):
 
         self.event_id = insert_event(
             EventRecord(
-                track_id="t1", camera_id="cam01", animal_name="tiger", confidence=0.9, snapshot_path="/tmp/x.jpg"
+                track_id="t1", camera_id="cam01", animal_name="tiger", confidence=0.9, snapshot_path="snapshots/x.jpg"
             )
         )
 
@@ -106,7 +106,7 @@ class TestSendPendingVideosLoop(unittest.TestCase):
 
         self.event_id = insert_event(
             EventRecord(
-                track_id="t1", camera_id="cam01", animal_name="tiger", confidence=0.9, snapshot_path="/tmp/x.jpg"
+                track_id="t1", camera_id="cam01", animal_name="tiger", confidence=0.9, snapshot_path="snapshots/x.jpg"
             )
         )
         set_video_path(self.event_id, str(self.video_path))

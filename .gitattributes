@@ -1,0 +1,43 @@
+# Line endings: the repository and every working copy use LF, on Windows
+# too (this overrides core.autocrlf). The code is developed on Windows but
+# deployed to Raspberry Pi OS, where CRLF breaks shell scripts ("bad
+# interpreter: /bin/bash^M") and can break systemd / NetworkManager files.
+* text=auto eol=lf
+
+# Deployed to Linux: always LF, even if Git's text detection guesses wrong.
+*.py            text eol=lf
+*.sh            text eol=lf
+*.service       text eol=lf
+*.timer         text eol=lf
+*.rules         text eol=lf
+*.conf          text eol=lf
+*.snippet       text eol=lf
+*.nmconnection  text eol=lf
+*.yaml          text eol=lf
+*.yml           text eol=lf
+*.toml          text eol=lf
+*.ini           text eol=lf
+*.json          text eol=lf
+*.sql           text eol=lf
+*.md            text eol=lf
+*.txt           text eol=lf
+.bandit         text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+.env.example    text eol=lf
+systemd/logrotate.d/*  text eol=lf
+
+# Windows-only scripts keep CRLF.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binary: never convert or diff as text.
+*.onnx    binary
+*.hef     binary
+*.pt      binary
+*.jpg     binary
+*.jpeg    binary
+*.png     binary
+*.mp4     binary
+*.sqlite3 binary

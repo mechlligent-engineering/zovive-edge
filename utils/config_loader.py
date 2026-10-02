@@ -232,7 +232,7 @@ def read_yaml_file(path: Path, source: str | None = None) -> tuple[dict[str, Any
         return None, [ConfigIssue(source, "", f"cannot read {path}: {exc.strerror or exc}", IssueKind.FILESYSTEM)]
 
     try:
-        data = yaml.load(text, Loader=_StrictLoader)  # noqa: S506 - _StrictLoader derives from SafeLoader
+        data = yaml.load(text, Loader=_StrictLoader)  # nosec B506  # noqa: S506 - _StrictLoader derives from SafeLoader
     except yaml.MarkedYAMLError as exc:
         mark = exc.problem_mark or exc.context_mark
         where = f" at line {mark.line + 1}, column {mark.column + 1}" if mark else ""
