@@ -50,9 +50,12 @@ class BaseStationClient:
             if snapshot_bytes is not None:
                 files = {"snapshot": ("snapshot.jpg", snapshot_bytes, "image/jpeg")}
                 resp = requests.post(
-                    url, data={"payload": _to_json(event)}, files=files,
+                    url,
+                    data={"payload": _to_json(event)},
+                    files=files,
                     headers={"Authorization": self._headers().get("Authorization", "")},
-                    timeout=self.timeout_sec, verify=self.verify,
+                    timeout=self.timeout_sec,
+                    verify=self.verify,
                 )
             else:
                 resp = requests.post(

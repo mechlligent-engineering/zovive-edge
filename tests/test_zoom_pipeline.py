@@ -60,13 +60,18 @@ class TestZoomPipeline(unittest.TestCase):
     def _run(self, per_cycle_detections, zoomed_timeout_sec=30.0):
         self.camera = FakeLensCamera()
         self.zoom = AnimalZoomController(
-            self.camera, mode_manager=ModeManager(), zoom_settle_sec=0.0, focus_settle_sec=0.0,
+            self.camera,
+            mode_manager=ModeManager(),
+            zoom_settle_sec=0.0,
+            focus_settle_sec=0.0,
             zoomed_timeout_sec=zoomed_timeout_sec,
         )
         queue = DetectionQueue(maxsize=50)
         frame = blank_frame(640, 360)
         for i, dets in enumerate(per_cycle_detections):
-            queue.put(DetectionBatch(seq=i, timestamp=float(i), frame=frame, detections=dets, camera_id="cam01"))
+            queue.put(
+                DetectionBatch(seq=i, timestamp=float(i), frame=frame, detections=dets, camera_id="cam01")
+            )
 
         dispatcher = AlertDispatcher(
             AlertQueue(),

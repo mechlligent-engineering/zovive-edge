@@ -52,11 +52,11 @@ class CameraApiError(RuntimeError):
 def _import_onvif():
     try:
         from onvif import ONVIFCamera  # type: ignore
+
         return ONVIFCamera
     except ImportError as exc:
         raise CameraApiError(
-            "onvif-zeep is not installed. Install requirements-pi.txt, or use "
-            "FakeLensCamera for development."
+            "onvif-zeep is not installed. Install requirements-pi.txt, or use FakeLensCamera for development."
         ) from exc
 
 

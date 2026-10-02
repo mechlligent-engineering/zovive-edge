@@ -45,7 +45,9 @@ class ZoomPlanConfig:
             max_optical_magnification=float(
                 zoom_cfg.get("max_optical_magnification", d.max_optical_magnification)
             ),
-            min_useful_magnification=float(zoom_cfg.get("min_useful_magnification", d.min_useful_magnification)),
+            min_useful_magnification=float(
+                zoom_cfg.get("min_useful_magnification", d.min_useful_magnification)
+            ),
             edge_margin_ratio=float(zoom_cfg.get("edge_margin_ratio", d.edge_margin_ratio)),
             wide_zoom_level=float(zoom_cfg.get("wide_zoom_level", d.wide_zoom_level)),
             max_zoom_level=float(zoom_cfg.get("max_zoom_level", d.max_zoom_level)),

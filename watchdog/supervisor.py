@@ -60,7 +60,7 @@ class RestartPolicy:
         )
 
     def backoff(self, recent_restarts: int) -> float:
-        return min(self.initial_backoff_sec * (2 ** recent_restarts), self.max_backoff_sec)
+        return min(self.initial_backoff_sec * (2**recent_restarts), self.max_backoff_sec)
 
 
 class SupervisedThread:

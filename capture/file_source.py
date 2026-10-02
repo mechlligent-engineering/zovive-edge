@@ -45,9 +45,7 @@ class FileFrameSource:
 
     def start(self) -> None:
         self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self.run, name=f"file-source-{self.camera_id}", daemon=True
-        )
+        self._thread = threading.Thread(target=self.run, name=f"file-source-{self.camera_id}", daemon=True)
         self._thread.start()
 
     def stop(self, join_timeout: float = 5.0) -> None:

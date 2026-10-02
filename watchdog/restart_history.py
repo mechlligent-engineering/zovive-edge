@@ -33,7 +33,9 @@ def record_start(path: Path, now: float) -> dict:
     }
     _write(path, record)
     if unclean:
-        log.warning("previous edge_main run ended uncleanly", extra={"process_starts": record["process_starts"]})
+        log.warning(
+            "previous edge_main run ended uncleanly", extra={"process_starts": record["process_starts"]}
+        )
     return record
 
 

@@ -230,16 +230,26 @@ def read_yaml_file(
     source = source or path.name
     try:
         if path.is_dir():
-            return None, [ConfigIssue(source, "", f"expected a file but found a directory: {path}", IssueKind.FILESYSTEM)]
+            return None, [
+                ConfigIssue(
+                    source, "", f"expected a file but found a directory: {path}", IssueKind.FILESYSTEM
+                )
+            ]
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None, [ConfigIssue(source, "", f"file not found: {path}", IssueKind.MISSING_FILE)]
     except PermissionError:
         return None, [ConfigIssue(source, "", f"permission denied reading {path}", IssueKind.PERMISSION)]
     except UnicodeDecodeError as exc:
-        return None, [ConfigIssue(source, "", f"file is not valid UTF-8 ({exc.reason} at byte {exc.start})", IssueKind.PARSE)]
+        return None, [
+            ConfigIssue(
+                source, "", f"file is not valid UTF-8 ({exc.reason} at byte {exc.start})", IssueKind.PARSE
+            )
+        ]
     except OSError as exc:
-        return None, [ConfigIssue(source, "", f"cannot read {path}: {exc.strerror or exc}", IssueKind.FILESYSTEM)]
+        return None, [
+            ConfigIssue(source, "", f"cannot read {path}: {exc.strerror or exc}", IssueKind.FILESYSTEM)
+        ]
 
     try:
         data = yaml.load(text, Loader=_StrictLoader)  # nosec B506  # noqa: S506 - _StrictLoader derives from SafeLoader
@@ -257,11 +267,18 @@ def read_yaml_file(
         return None, [ConfigIssue(source, "", "file is empty", IssueKind.PARSE)]
     if not isinstance(data, dict):
         return None, [
-            ConfigIssue(source, "", f"top level must be a mapping of 'key: value' pairs, got {type(data).__name__}", IssueKind.PARSE)
+            ConfigIssue(
+                source,
+                "",
+                f"top level must be a mapping of 'key: value' pairs, got {type(data).__name__}",
+                IssueKind.PARSE,
+            )
         ]
     bad_keys = [k for k in data if not isinstance(k, str)]
     if bad_keys:
-        return None, [ConfigIssue(source, "", f"top-level keys must be strings, got {bad_keys!r}", IssueKind.PARSE)]
+        return None, [
+            ConfigIssue(source, "", f"top-level keys must be strings, got {bad_keys!r}", IssueKind.PARSE)
+        ]
     return data, []
 
 
@@ -300,7 +317,12 @@ def load(path: str | Path, required: bool = True) -> dict[str, Any]:
 
     def on_missing_env(key: str, var: str) -> None:
         missing.append(
-            ConfigIssue(p.name, key, f"required environment variable {var} is not set or is empty", IssueKind.MISSING_ENV)
+            ConfigIssue(
+                p.name,
+                key,
+                f"required environment variable {var} is not set or is empty",
+                IssueKind.MISSING_ENV,
+            )
         )
 
     data = _interpolate(data, os.environ, "", on_missing_env)
@@ -364,7 +386,9 @@ class ConfigReader:
 
     def error(self, key: str, message: str, kind: IssueKind = IssueKind.INVALID_VALUE) -> None:
         if not self._suppressed:
-            self._issues.append(ConfigIssue(self._source, self.key_path(key) if key else self._prefix, message, kind))
+            self._issues.append(
+                ConfigIssue(self._source, self.key_path(key) if key else self._prefix, message, kind)
+            )
 
     def has(self, key: str) -> bool:
         return self._data.get(key) is not None
@@ -402,7 +426,9 @@ class ConfigReader:
         try:
             return convert(value), True
         except (TypeError, ValueError):
-            self.error(key, f"expected {expected}, got {value!r} ({type(value).__name__})", IssueKind.INVALID_TYPE)
+            self.error(
+                key, f"expected {expected}, got {value!r} ({type(value).__name__})", IssueKind.INVALID_TYPE
+            )
             return placeholder, False
 
     def _check_range(
@@ -499,7 +525,9 @@ class ConfigReader:
         items: list[str] = []
         for i, item in enumerate(value):
             if not isinstance(item, str) or not item.strip():
-                self.error(f"{key}[{i}]", f"expected a non-empty string, got {item!r}", IssueKind.INVALID_TYPE)
+                self.error(
+                    f"{key}[{i}]", f"expected a non-empty string, got {item!r}", IssueKind.INVALID_TYPE
+                )
                 continue
             items.append(item.strip())
         dupes = sorted({x for x in items if items.count(x) > 1})
@@ -517,11 +545,23 @@ class ConfigReader:
         prefix = self.key_path(key)
         if value is _ABSENT:
             # Required-and-missing was already reported; don't also report every child.
-            return ConfigReader({}, source=self._source, issues=self._issues, prefix=prefix, suppressed=required or self._suppressed)
+            return ConfigReader(
+                {},
+                source=self._source,
+                issues=self._issues,
+                prefix=prefix,
+                suppressed=required or self._suppressed,
+            )
         if not isinstance(value, dict):
-            self.error(key, f"expected a mapping (indented 'key: value' block), got {type(value).__name__}", IssueKind.INVALID_TYPE)
+            self.error(
+                key,
+                f"expected a mapping (indented 'key: value' block), got {type(value).__name__}",
+                IssueKind.INVALID_TYPE,
+            )
             return ConfigReader({}, source=self._source, issues=self._issues, prefix=prefix, suppressed=True)
-        child = ConfigReader(value, source=self._source, issues=self._issues, prefix=prefix, suppressed=self._suppressed)
+        child = ConfigReader(
+            value, source=self._source, issues=self._issues, prefix=prefix, suppressed=self._suppressed
+        )
         self._children.append(child)
         return child
 
@@ -692,7 +732,9 @@ class ReconnectPolicy:
 
     def delay_for_attempt(self, attempt: int) -> float:
         """Backoff delay before reconnect ``attempt`` (1-based), capped at ``max_delay_sec``."""
-        return min(self.max_delay_sec, self.initial_delay_sec * self.backoff_multiplier ** max(0, attempt - 1))
+        return min(
+            self.max_delay_sec, self.initial_delay_sec * self.backoff_multiplier ** max(0, attempt - 1)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -776,7 +818,9 @@ def parse_camera(r: ConfigReader, ctx: ParseContext) -> CameraConfig:
         ),
         fps=r.integer("fps", min_value=1, max_value=120),
         timeout_sec=r.number("timeout_sec", 10.0, gt=0),
-        transport=RtspTransport(transport) if transport in {t.value for t in RtspTransport} else RtspTransport.TCP,
+        transport=RtspTransport(transport)
+        if transport in {t.value for t in RtspTransport}
+        else RtspTransport.TCP,
         reconnect=reconnect,
         ptz=ptz,
         raw=r.raw,
@@ -908,7 +952,9 @@ class StorageConfig:
             except PermissionError as exc:
                 raise DirectoryCreationError(f"storage.{name}: permission denied creating {path}") from exc
             except OSError as exc:
-                raise DirectoryCreationError(f"storage.{name}: cannot create {path}: {exc.strerror or exc}") from exc
+                raise DirectoryCreationError(
+                    f"storage.{name}: cannot create {path}: {exc.strerror or exc}"
+                ) from exc
             if not os.access(path, os.W_OK):
                 raise DirectoryCreationError(f"storage.{name}: {path} is not writable by this user")
 
@@ -1044,7 +1090,9 @@ class AppConfig:
         try:
             return self.extensions[name]
         except KeyError:
-            raise KeyError(f"no config section named {name!r}; registered: {sorted(_CORE_NAMES | set(self.extensions))}") from None
+            raise KeyError(
+                f"no config section named {name!r}; registered: {sorted(_CORE_NAMES | set(self.extensions))}"
+            ) from None
 
     def summary(self) -> dict[str, Any]:
         """Short, credential-free description suitable for a startup log line."""
@@ -1090,7 +1138,9 @@ class ConfigLoader:
         extra_sections: Iterable[SectionSpec[Any]] = (),
     ):
         self._env: Mapping[str, str] = dict(os.environ if env is None else env)
-        self.config_dir = Path(config_dir).expanduser().resolve() if config_dir else default_config_dir(self._env)
+        self.config_dir = (
+            Path(config_dir).expanduser().resolve() if config_dir else default_config_dir(self._env)
+        )
         self.base_dir = Path(base_dir).expanduser().resolve() if base_dir else PROJECT_ROOT
         self._specs: dict[str, SectionSpec[Any]] = {s.name: s for s in CORE_SECTIONS}
         for spec in extra_sections:
@@ -1108,7 +1158,13 @@ class ConfigLoader:
         """Load and validate everything. Raises ``ConfigError`` listing every problem."""
         if not self.config_dir.is_dir():
             what = "is not a directory" if self.config_dir.exists() else "does not exist"
-            raise ConfigError([ConfigIssue(str(self.config_dir), "", f"configuration directory {what}", IssueKind.MISSING_DIR)])
+            raise ConfigError(
+                [
+                    ConfigIssue(
+                        str(self.config_dir), "", f"configuration directory {what}", IssueKind.MISSING_DIR
+                    )
+                ]
+            )
 
         ctx = ParseContext(base_dir=self.base_dir, config_dir=self.config_dir)
         issues: list[ConfigIssue] = []
@@ -1149,20 +1205,36 @@ class ConfigLoader:
 
         def on_missing_env(key: str, var: str) -> None:
             issues.append(
-                ConfigIssue(spec.filename, key, f"environment variable {var} is not set or is empty and no default given "
-                            f"(use ${{{var}:-default}} to provide one)", IssueKind.MISSING_ENV)
+                ConfigIssue(
+                    spec.filename,
+                    key,
+                    f"environment variable {var} is not set or is empty and no default given "
+                    f"(use ${{{var}:-default}} to provide one)",
+                    IssueKind.MISSING_ENV,
+                )
             )
 
         data = _interpolate(copy.deepcopy(data), self._env, "", on_missing_env)
         reader = ConfigReader(data, source=spec.filename, issues=issues)
-        reader.integer("schema_version", SUPPORTED_SCHEMA_VERSION, min_value=1, max_value=SUPPORTED_SCHEMA_VERSION)
+        reader.integer(
+            "schema_version", SUPPORTED_SCHEMA_VERSION, min_value=1, max_value=SUPPORTED_SCHEMA_VERSION
+        )
         try:
             value = spec.parser(reader, ctx)
         except Exception as exc:  # a buggy parser must not crash startup without context
-            issues.append(ConfigIssue(spec.filename, "", f"parser failed: {type(exc).__name__}: {exc}", IssueKind.INTERNAL))
+            issues.append(
+                ConfigIssue(
+                    spec.filename, "", f"parser failed: {type(exc).__name__}: {exc}", IssueKind.INTERNAL
+                )
+            )
             return None, []
         warnings = [
-            ConfigIssue(spec.filename, key, "unknown key ignored (typo, or newer config than this code?)", IssueKind.UNKNOWN_KEY)
+            ConfigIssue(
+                spec.filename,
+                key,
+                "unknown key ignored (typo, or newer config than this code?)",
+                IssueKind.UNKNOWN_KEY,
+            )
             for key in reader.unknown_keys()
         ]
         return value, warnings

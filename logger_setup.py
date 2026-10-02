@@ -30,9 +30,10 @@ import paths
 
 # Attributes that come standard on every LogRecord; anything else set via
 # `extra=` is application context and gets folded into the JSON payload.
-_STANDARD_ATTRS = frozenset(logging.LogRecord(
-    "", 0, "", 0, "", (), None
-).__dict__.keys()) | {"message", "asctime"}
+_STANDARD_ATTRS = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__.keys()) | {
+    "message",
+    "asctime",
+}
 
 
 class JsonFormatter(logging.Formatter):
@@ -44,9 +45,7 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
-            "ts": time.strftime(
-                "%Y-%m-%dT%H:%M:%S", time.localtime(record.created)
-            )
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(record.created))
             + f".{int(record.msecs):03d}Z",
             "level": record.levelname,
             "service": self.service,

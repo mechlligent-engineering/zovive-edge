@@ -43,23 +43,30 @@ class TestThrottle(unittest.TestCase):
             self.assertEqual(health_main._pi_throttle_status()["error"], "not_available")
 
     def test_timeout_does_not_raise(self):
-        with patch.object(health_main, "_find_vcgencmd", return_value="/usr/bin/vcgencmd"), patch.object(
-            health_main.subprocess, "run", side_effect=health_main.subprocess.TimeoutExpired("vcgencmd", 2)
+        with (
+            patch.object(health_main, "_find_vcgencmd", return_value="/usr/bin/vcgencmd"),
+            patch.object(
+                health_main.subprocess,
+                "run",
+                side_effect=health_main.subprocess.TimeoutExpired("vcgencmd", 2),
+            ),
         ):
             self.assertEqual(health_main._pi_throttle_status()["error"], "timeout")
 
     def test_nonzero_exit_is_failed(self):
         result = MagicMock(returncode=255, stdout="", stderr="VCHI init failed")
-        with patch.object(health_main, "_find_vcgencmd", return_value="/usr/bin/vcgencmd"), patch.object(
-            health_main.subprocess, "run", return_value=result
+        with (
+            patch.object(health_main, "_find_vcgencmd", return_value="/usr/bin/vcgencmd"),
+            patch.object(health_main.subprocess, "run", return_value=result),
         ):
             self.assertEqual(health_main._pi_throttle_status()["error"], "failed")
 
     def test_success_uses_absolute_path_and_no_shell(self):
         result = MagicMock(returncode=0, stdout="throttled=0x0\n", stderr="")
-        with patch.object(health_main, "_find_vcgencmd", return_value="/usr/bin/vcgencmd"), patch.object(
-            health_main.subprocess, "run", return_value=result
-        ) as run:
+        with (
+            patch.object(health_main, "_find_vcgencmd", return_value="/usr/bin/vcgencmd"),
+            patch.object(health_main.subprocess, "run", return_value=result) as run,
+        ):
             status = health_main._pi_throttle_status()
         self.assertEqual(status["raw"], "throttled=0x0")
         self.assertIsNone(status["error"])
@@ -144,7 +151,9 @@ class TestConfigHandling(unittest.TestCase):
         self.assertEqual(warning.call_count, 3)  # failures 1, 20, 40
 
     def test_build_client_passes_ca_bundle(self):
-        client = build_client({"base_station": {"url": "https://bs.local", "ca_bundle": "/etc/zovive/ca.pem"}})
+        client = build_client(
+            {"base_station": {"url": "https://bs.local", "ca_bundle": "/etc/zovive/ca.pem"}}
+        )
         self.assertIsInstance(client, BaseStationClient)
         self.assertEqual(client.verify, "/etc/zovive/ca.pem")
 
@@ -159,7 +168,9 @@ class TestEdgeHealth(unittest.TestCase):
         self.status.pipeline_tick(active_tracks=2, zoom_state="WIDE")
 
     def _eval(self, advance: float = 0.0):
-        snap = self.status.snapshot(stream={"is_stalled": False}, queues={"detection_queue": {"current_size": 1}})
+        snap = self.status.snapshot(
+            stream={"is_stalled": False}, queues={"detection_queue": {"current_size": 1}}
+        )
         self.clock.now += advance
         return evaluate_edge_health(snap, self.clock.now, stale_after_sec=30)
 
@@ -167,7 +178,8 @@ class TestEdgeHealth(unittest.TestCase):
         edge = self._eval()
         self.assertTrue(edge["edge_process_alive"])
         self.assertEqual(
-            (edge["inference_status"], edge["tracker_status"], edge["camera_stream_status"]), ("ok", "ok", "ok")
+            (edge["inference_status"], edge["tracker_status"], edge["camera_stream_status"]),
+            ("ok", "ok", "ok"),
         )
         self.assertEqual(edge["last_detection_timestamp"], 1000.0)
         self.assertEqual(edge["queue_depths"]["detection_queue"]["depth"], 1)
@@ -220,7 +232,9 @@ class TestEdgeMainRecordsStatus(unittest.TestCase):
         slot = LatestFrameSlot(name="test_health_slot")
         slot.put(np.zeros((10, 10, 3), dtype=np.uint8))
         status = EdgeStatus("cam01")
-        _inference_loop(_OneTigerDetector(), slot, DetectionQueue(maxsize=2), "cam01", threading.Event(), 1, status)
+        _inference_loop(
+            _OneTigerDetector(), slot, DetectionQueue(maxsize=2), "cam01", threading.Event(), 1, status
+        )
         snap = status.snapshot()
         self.assertIsNotNone(snap["inference_loop_ts"])
         self.assertIsNotNone(snap["last_frame_ts"])

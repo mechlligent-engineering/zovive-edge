@@ -37,7 +37,11 @@ class TestTransferResume(unittest.TestCase):
     def test_failed_event_is_retried_after_backoff_and_marked_sent(self):
         event_id = insert_event(
             EventRecord(
-                track_id="t1", camera_id="cam01", animal_name="tiger", confidence=0.9, snapshot_path="snapshots/x.jpg"
+                track_id="t1",
+                camera_id="cam01",
+                animal_name="tiger",
+                confidence=0.9,
+                snapshot_path="snapshots/x.jpg",
             )
         )
         self.assertEqual(count_by_status(), {"pending": 1})
@@ -64,8 +68,24 @@ class TestTransferResume(unittest.TestCase):
         self.assertEqual(get_pending(), [])
 
     def test_multiple_events_tracked_independently(self):
-        e1 = insert_event(EventRecord(track_id="t1", camera_id="cam01", animal_name="tiger", confidence=0.9, snapshot_path="snapshots/a.jpg"))
-        e2 = insert_event(EventRecord(track_id="t2", camera_id="cam01", animal_name="gaur", confidence=0.8, snapshot_path="snapshots/b.jpg"))
+        e1 = insert_event(
+            EventRecord(
+                track_id="t1",
+                camera_id="cam01",
+                animal_name="tiger",
+                confidence=0.9,
+                snapshot_path="snapshots/a.jpg",
+            )
+        )
+        e2 = insert_event(
+            EventRecord(
+                track_id="t2",
+                camera_id="cam01",
+                animal_name="gaur",
+                confidence=0.8,
+                snapshot_path="snapshots/b.jpg",
+            )
+        )
 
         mark_sent(e1)
         mark_failed(e2, "timeout")

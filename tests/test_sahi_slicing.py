@@ -1,4 +1,5 @@
 """SAHI tile geometry and merge tests."""
+
 import unittest
 
 import numpy as np
@@ -22,7 +23,7 @@ class TestSahiSlicing(unittest.TestCase):
 
     def test_merge_deduplicates_across_overlapping_tiles(self):
         a = (np.array([[10.0, 10.0, 110.0, 110.0]]), np.array([0.9]), np.array([0]), (0, 0))
-        b = (np.array([[8.0, 8.0, 108.0, 108.0]]),   np.array([0.8]), np.array([0]), (0, 0))
+        b = (np.array([[8.0, 8.0, 108.0, 108.0]]), np.array([0.8]), np.array([0]), (0, 0))
         boxes, scores, _ = merge_detections([a, b], iou_thr=0.5)
         self.assertEqual(len(boxes), 1)
         self.assertEqual(scores[0], 0.9)

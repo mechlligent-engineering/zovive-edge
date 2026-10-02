@@ -174,7 +174,9 @@ def run(max_cycles: int | None = None) -> None:
     # deletion is forced off regardless of the config value. Only a
     # real, configured base station can ever trigger a local delete.
     base_station_configured = bool(cfg.get("base_station", {}).get("url"))
-    delete_local_files_after_ack = bool(t.get("delete_local_files_after_ack", True)) and base_station_configured
+    delete_local_files_after_ack = (
+        bool(t.get("delete_local_files_after_ack", True)) and base_station_configured
+    )
     if bool(t.get("delete_local_files_after_ack", True)) and not base_station_configured:
         log.warning(
             "delete_local_files_after_ack is on but no base_station.url is configured; "

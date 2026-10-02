@@ -7,14 +7,20 @@ from pipeline.track_state_machine import TrackState, TrackStateMachine
 
 def _track(track_id="t1", presence=(True,)):
     return Track(
-        track_id=track_id, box=(0, 0, 10, 10), class_id=5, class_name="tiger", score=0.9,
+        track_id=track_id,
+        box=(0, 0, 10, 10),
+        class_id=5,
+        class_name="tiger",
+        score=0.9,
         presence_history=list(presence),
     )
 
 
 class TestTrackStateMachine(unittest.TestCase):
     def setUp(self):
-        self.gate = Stage1Gate(Stage1Config(min_hits_in_window=2, window_size=2, track_alert_cooldown_sec=100.0))
+        self.gate = Stage1Gate(
+            Stage1Config(min_hits_in_window=2, window_size=2, track_alert_cooldown_sec=100.0)
+        )
         self.sm = TrackStateMachine(self.gate)
 
     def test_new_track_starts_confirming(self):

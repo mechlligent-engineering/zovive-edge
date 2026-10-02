@@ -51,7 +51,11 @@ class TestVideoOutboxHelpers(unittest.TestCase):
 
         self.event_id = insert_event(
             EventRecord(
-                track_id="t1", camera_id="cam01", animal_name="tiger", confidence=0.9, snapshot_path="snapshots/x.jpg"
+                track_id="t1",
+                camera_id="cam01",
+                animal_name="tiger",
+                confidence=0.9,
+                snapshot_path="snapshots/x.jpg",
             )
         )
 
@@ -106,7 +110,11 @@ class TestSendPendingVideosLoop(unittest.TestCase):
 
         self.event_id = insert_event(
             EventRecord(
-                track_id="t1", camera_id="cam01", animal_name="tiger", confidence=0.9, snapshot_path="snapshots/x.jpg"
+                track_id="t1",
+                camera_id="cam01",
+                animal_name="tiger",
+                confidence=0.9,
+                snapshot_path="snapshots/x.jpg",
             )
         )
         set_video_path(self.event_id, str(self.video_path))
@@ -135,7 +143,9 @@ class TestSendPendingVideosLoop(unittest.TestCase):
 
     def test_failed_upload_is_retried_after_backoff(self):
         client = _FakeClient(fail_first_n=1)
-        state = TransferState(initial_backoff_sec=100.0)  # long backoff so the 2nd call below is deterministic
+        state = TransferState(
+            initial_backoff_sec=100.0
+        )  # long backoff so the 2nd call below is deterministic
 
         _send_pending_videos(client, state, batch_size=10, timeout_sec=30.0)
         self.assertEqual(len(client.calls), 1)

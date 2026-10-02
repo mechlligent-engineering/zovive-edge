@@ -162,9 +162,9 @@ Then, only if something was found:
 
 ```python
 cluster = cluster_box(boxes, frame.shape, pad_ratio=0.10, min_size=640)
-tiles   = compute_tiles(cluster_w, cluster_h, 640, 640, 0.2, 0.2)
-crops   = [region[y0:y1, x0:x1] for (x0, y0, x1, y1) in tiles]
-raw     = npu_scheduler.submit_batch("species", crops, priority=LOW)
+tiles = compute_tiles(cluster_w, cluster_h, 640, 640, 0.2, 0.2)
+crops = [region[y0:y1, x0:x1] for (x0, y0, x1, y1) in tiles]
+raw = npu_scheduler.submit_batch("species", crops, priority=LOW)
 boxes, scores, classes = merge_detections(per_tile_results, iou_thr=0.5)
 ```
 

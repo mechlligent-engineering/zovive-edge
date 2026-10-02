@@ -1,4 +1,5 @@
 """ROI cluster tests."""
+
 import unittest
 
 from pipeline.roi_cluster import cluster_area_ratio, cluster_box

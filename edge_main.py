@@ -181,7 +181,11 @@ def _inference_loop(
             status.inference_ok(len(detections))
         detection_queue.put(
             DetectionBatch(
-                seq=env.seq, timestamp=env.timestamp, frame=env.frame, detections=detections, camera_id=camera_id
+                seq=env.seq,
+                timestamp=env.timestamp,
+                frame=env.frame,
+                detections=detections,
+                camera_id=camera_id,
             )
         )
         cycles += 1
@@ -217,7 +221,9 @@ def _classify_and_dispatch(
     return result, event_id
 
 
-def _reset_tracking(tracker: IouTracker, track_sm: TrackStateMachine, snapshot_store: BestSnapshotStore) -> None:
+def _reset_tracking(
+    tracker: IouTracker, track_sm: TrackStateMachine, snapshot_store: BestSnapshotStore
+) -> None:
     """The lens is moving: every box from the previous view is meaningless."""
     tracker.reset()
     track_sm.sweep_lost(set())
@@ -267,8 +273,14 @@ def _pipeline_loop(
             # evidence captured when the zoom started.
             snapshot = expired.wide_frame if expired.wide_frame is not None else batch.frame
             result, event_id = _classify_and_dispatch(
-                classifier, cls_cfg, expired.wide_crops, snapshot, expired.track_id,
-                dispatcher, WIDE_VIEW, model_version,
+                classifier,
+                cls_cfg,
+                expired.wide_crops,
+                snapshot,
+                expired.track_id,
+                dispatcher,
+                WIDE_VIEW,
+                model_version,
             )
             zoom.complete(event_id, result.species, result.confidence)
             if event_id and clip_extractor is not None:
@@ -311,7 +323,9 @@ def _pipeline_loop(
                 if known is not None:
                     # Same animal already handled before/while zooming, back
                     # under a new track id: don't re-zoom or re-alert it.
-                    track_sm.mark_classified(track.track_id, known.species or track.class_name, known.confidence)
+                    track_sm.mark_classified(
+                        track.track_id, known.species or track.class_name, known.confidence
+                    )
                     if known.event_id:
                         track_sm.mark_alerted(track.track_id, known.event_id)
                     continue
@@ -340,7 +354,9 @@ def _pipeline_loop(
             if event_id:
                 track_sm.mark_alerted(track.track_id, event_id)
                 if clip_extractor is not None:
-                    clip_extractor.start(event_id=event_id, track_id=track.track_id, camera_id=batch.camera_id)
+                    clip_extractor.start(
+                        event_id=event_id, track_id=track.track_id, camera_id=batch.camera_id
+                    )
 
             if view == ZOOMED_VIEW and zoom.state == ZoomState.ZOOMED:
                 # Final zoomed snapshot stored: zoom back out.
@@ -458,9 +474,21 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
         SupervisedThread(
             "pipeline",
             lambda: _pipeline_loop(
-                detection_queue, classifier, zoom, tracker, track_sm, zone_filter, motion_gate,
-                snapshot_store, dispatcher, inf_cfg, model_version, _shutdown_event, max_cycles,
-                clip_extractor, edge_status,
+                detection_queue,
+                classifier,
+                zoom,
+                tracker,
+                track_sm,
+                zone_filter,
+                motion_gate,
+                snapshot_store,
+                dispatcher,
+                inf_cfg,
+                model_version,
+                _shutdown_event,
+                max_cycles,
+                clip_extractor,
+                edge_status,
             ),
             liveness=edge_status.pipeline_loop_ts,
             on_restart=reset_pipeline,
@@ -559,7 +587,9 @@ def main() -> None:
     except ConfigError as exc:
         # Missing camera credentials or a bad config file: one clear line
         # naming the file, key and variable (never its value), no traceback.
-        log.critical("refusing to start: invalid configuration", extra={"problems": [str(i) for i in exc.issues]})
+        log.critical(
+            "refusing to start: invalid configuration", extra={"problems": [str(i) for i in exc.issues]}
+        )
         logging.shutdown()
         sys.exit(EXIT_CONFIG)
     if exit_code != EXIT_OK:

@@ -106,7 +106,11 @@ class ValidConfigTests(ConfigTestCase):
     def test_env_interpolation_overrides_defaults(self):
         # nosec B106: "s3cret" is a fake test credential, not a real secret; the
         # test checks that ${ZOVIVE_CAMERA_PASSWORD} is interpolated into the URL.
-        self.env.update(ZOVIVE_BASE_STATION_IP="10.0.0.5", ZOVIVE_BASE_STATION_PORT="9443", ZOVIVE_CAMERA_PASSWORD="s3cret")  # nosec B106
+        self.env.update(
+            ZOVIVE_BASE_STATION_IP="10.0.0.5",
+            ZOVIVE_BASE_STATION_PORT="9443",
+            ZOVIVE_CAMERA_PASSWORD="s3cret",
+        )  # nosec B106
         cfg = self.load()
         self.assertEqual(cfg.network.base_url, "http://10.0.0.5:9443")
         self.assertIn("s3cret", cfg.camera.rtsp_url)
@@ -334,7 +338,9 @@ class ExtensionTests(ConfigTestCase):
     def test_extension_validation_errors_are_aggregated(self):
         self.write("watchdog.yaml", "interval_sec: -1\n")
         spec = SectionSpec("watchdog", "watchdog.yaml", self.parse_watchdog)
-        self.assertIssue(self.load_error(extra_sections=[spec]), "watchdog.yaml", "interval_sec", IssueKind.INVALID_VALUE)
+        self.assertIssue(
+            self.load_error(extra_sections=[spec]), "watchdog.yaml", "interval_sec", IssueKind.INVALID_VALUE
+        )
 
     def test_crashing_parser_is_reported_not_raised_raw(self):
         def broken(r, ctx):

@@ -200,9 +200,11 @@ class TestSdNotify(unittest.TestCase):
     def test_sends_datagram_to_abstract_socket(self):
         fake_sock = MagicMock()
         fake_sock.__enter__.return_value = fake_sock
-        with patch.dict("os.environ", {"NOTIFY_SOCKET": "@/org/systemd/notify"}), patch.object(
-            sd_notify.socket, "AF_UNIX", 1, create=True
-        ), patch.object(sd_notify.socket, "socket", return_value=fake_sock):
+        with (
+            patch.dict("os.environ", {"NOTIFY_SOCKET": "@/org/systemd/notify"}),
+            patch.object(sd_notify.socket, "AF_UNIX", 1, create=True),
+            patch.object(sd_notify.socket, "socket", return_value=fake_sock),
+        ):
             self.assertTrue(sd_notify.watchdog_ping())
         fake_sock.connect.assert_called_once_with("\0/org/systemd/notify")
         fake_sock.sendall.assert_called_once_with(b"WATCHDOG=1")
@@ -314,9 +316,13 @@ class TestPipelineCrashRecovery(unittest.TestCase):
         frame = blank_frame(640, 360)
         det = Detection(box=(100, 60, 400, 300), score=0.9, class_id=5, class_name="tiger")
         for i in range(6):
-            queue.put(DetectionBatch(seq=i, timestamp=float(i), frame=frame, detections=[det], camera_id="cam01"))
+            queue.put(
+                DetectionBatch(seq=i, timestamp=float(i), frame=frame, detections=[det], camera_id="cam01")
+            )
 
-        tracker = IouTracker(iou_match_threshold=0.3, max_age_frames=15, min_hits_to_confirm=1, presence_window=5)
+        tracker = IouTracker(
+            iou_match_threshold=0.3, max_age_frames=15, min_hits_to_confirm=1, presence_window=5
+        )
         track_sm = TrackStateMachine(Stage1Gate(Stage1Config(min_hits_in_window=3, window_size=5)))
         snapshot_store = BestSnapshotStore()
         zoom = AnimalZoomController(FakeLensCamera(), mode_manager=ModeManager())
@@ -340,10 +346,21 @@ class TestPipelineCrashRecovery(unittest.TestCase):
             SupervisedThread(
                 "pipeline",
                 lambda: edge_main._pipeline_loop(
-                    queue, AlwaysClassifier("tiger", 0.92), zoom, tracker, track_sm, ZoneFilter({"zones": {}}),
-                    MotionGate(), snapshot_store, dispatcher,
+                    queue,
+                    AlwaysClassifier("tiger", 0.92),
+                    zoom,
+                    tracker,
+                    track_sm,
+                    ZoneFilter({"zones": {}}),
+                    MotionGate(),
+                    snapshot_store,
+                    dispatcher,
                     {"classifier": {"max_crops_per_track": 5, "min_confidence": 0.5}},
-                    "test-v1", stop, 3, None, status,
+                    "test-v1",
+                    stop,
+                    3,
+                    None,
+                    status,
                 ),
                 liveness=status.pipeline_loop_ts,
                 on_restart=reset,

@@ -79,7 +79,9 @@ class KnownAnimal:
     expires_ts: float
 
 
-def _center_inside(box: tuple[float, float, float, float], region: tuple[float, float, float, float], grow: float) -> bool:
+def _center_inside(
+    box: tuple[float, float, float, float], region: tuple[float, float, float, float], grow: float
+) -> bool:
     x1, y1, x2, y2 = region
     gx, gy = (x2 - x1) * grow, (y2 - y1) * grow
     cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
@@ -158,7 +160,11 @@ class AnimalZoomController:
         self._deadline = now + self.zoom_settle_sec
         log.info(
             "zooming in on far animal",
-            extra={"track_id": track_id, "magnification": round(magnification, 2), "zoom_level": round(level, 3)},
+            extra={
+                "track_id": track_id,
+                "magnification": round(magnification, 2),
+                "zoom_level": round(level, 3),
+            },
         )
 
     def tick(self, now: float | None = None) -> ZoomSession | None:
@@ -183,8 +189,10 @@ class AnimalZoomController:
                 log.info("back to wide view")
 
         elif self.state == ZoomState.ZOOMED and now >= self._deadline:
-            log.info("no animal confirmed in zoomed view; falling back to wide evidence",
-                     extra={"track_id": self.session.track_id})
+            log.info(
+                "no animal confirmed in zoomed view; falling back to wide evidence",
+                extra={"track_id": self.session.track_id},
+            )
             return self.session
 
         return None

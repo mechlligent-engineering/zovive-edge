@@ -205,7 +205,9 @@ class _SendLog:
 def _clamp_interval(value: float) -> float:
     clamped = min(max(value, MIN_INTERVAL_SEC), MAX_INTERVAL_SEC)
     if clamped != value:
-        log.warning("heartbeat_interval_sec out of range; clamped", extra={"configured": value, "used": clamped})
+        log.warning(
+            "heartbeat_interval_sec out of range; clamped", extra={"configured": value, "used": clamped}
+        )
     return clamped
 
 
@@ -256,7 +258,11 @@ def run(max_cycles: int | None = None) -> None:
 
     log.info(
         "health_main started",
-        extra={"interval_sec": interval, "retention_days": retention_days, "stale_after_sec": stale_after_sec},
+        extra={
+            "interval_sec": interval,
+            "retention_days": retention_days,
+            "stale_after_sec": stale_after_sec,
+        },
     )
     send_log = _SendLog()
     next_prune = 0.0

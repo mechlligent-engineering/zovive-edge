@@ -45,12 +45,8 @@ class RtspReader:
         self.camera_id = camera_id
         self.cfg = config or load(paths.RTSP_CONFIG)
         cam = self.cfg.get("camera", {})
-        self.sub_url = _build_url(
-            cam["sub_stream"]["url"], cam["host"], cam["username"], cam["password"]
-        )
-        self.main_url = _build_url(
-            cam["main_stream"]["url"], cam["host"], cam["username"], cam["password"]
-        )
+        self.sub_url = _build_url(cam["sub_stream"]["url"], cam["host"], cam["username"], cam["password"])
+        self.main_url = _build_url(cam["main_stream"]["url"], cam["host"], cam["username"], cam["password"])
         stall_timeout = float(self.cfg.get("reconnect", {}).get("stall_timeout_sec", 5.0))
         self.health = StreamHealth(camera_id, stall_timeout_sec=stall_timeout)
         self._reconnect_policy = ReconnectPolicy.from_config(self.cfg)
@@ -63,9 +59,7 @@ class RtspReader:
 
     def start(self) -> None:
         self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self.run, name=f"rtsp-reader-{self.camera_id}", daemon=True
-        )
+        self._thread = threading.Thread(target=self.run, name=f"rtsp-reader-{self.camera_id}", daemon=True)
         self._thread.start()
 
     def stop(self, join_timeout: float = 5.0) -> None:

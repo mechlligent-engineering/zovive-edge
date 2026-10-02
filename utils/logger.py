@@ -163,7 +163,7 @@ class EdgeFormatter(logging.Formatter):
 def module_display_name(logger_name: str) -> str:
     prefix = ROOT_LOGGER_NAME + "."
     if logger_name.startswith(prefix):
-        return logger_name[len(prefix):]
+        return logger_name[len(prefix) :]
     return logger_name
 
 

@@ -54,7 +54,15 @@ class ScriptedDetector(Detector):
     """
 
     def __init__(self, script: list[list[Detection]], class_names: list[str] | None = None):
-        self.class_names = class_names or ["deer", "gaur", "leopard", "elephant", "sloth_bear", "tiger", "wild_boar"]
+        self.class_names = class_names or [
+            "deer",
+            "gaur",
+            "leopard",
+            "elephant",
+            "sloth_bear",
+            "tiger",
+            "wild_boar",
+        ]
         self.script = script
         self._i = 0
         self.calls = 0
@@ -74,7 +82,15 @@ class AlwaysClassifier(Classifier):
     classifier accuracy."""
 
     def __init__(self, species: str, confidence: float, class_names: list[str] | None = None):
-        self.class_names = class_names or ["deer", "gaur", "leopard", "elephant", "sloth_bear", "tiger", "wild_boar"]
+        self.class_names = class_names or [
+            "deer",
+            "gaur",
+            "leopard",
+            "elephant",
+            "sloth_bear",
+            "tiger",
+            "wild_boar",
+        ]
         self.species = species
         self.confidence = confidence
 
@@ -101,7 +117,15 @@ class ScriptedClassifier(Classifier):
     """
 
     def __init__(self, script: list[ClassificationResult], class_names: list[str] | None = None):
-        self.class_names = class_names or ["deer", "gaur", "leopard", "elephant", "sloth_bear", "tiger", "wild_boar"]
+        self.class_names = class_names or [
+            "deer",
+            "gaur",
+            "leopard",
+            "elephant",
+            "sloth_bear",
+            "tiger",
+            "wild_boar",
+        ]
         self.script = script
         self._i = 0
 

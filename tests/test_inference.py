@@ -43,7 +43,13 @@ class TestYoloPostprocess(unittest.TestCase):
         ).T  # shape (6, 2) = (4+num_classes, N)
 
         dets = decode_yolo_detections(
-            arr, class_names, ratio=1.0, pad=(0, 0), orig_shape=(100, 100), conf_threshold=0.5, iou_threshold=0.5
+            arr,
+            class_names,
+            ratio=1.0,
+            pad=(0, 0),
+            orig_shape=(100, 100),
+            conf_threshold=0.5,
+            iou_threshold=0.5,
         )
         self.assertEqual(len(dets), 1)
         self.assertEqual(dets[0].class_name, "tiger")
@@ -77,7 +83,9 @@ class TestIouTracker(unittest.TestCase):
     def test_non_overlapping_detection_creates_new_track(self):
         tracker = IouTracker(iou_match_threshold=0.3, max_age_frames=5, min_hits_to_confirm=1)
         tracker.update([Detection(box=(10, 10, 50, 50), score=0.9, class_id=5, class_name="tiger")])
-        tracks = tracker.update([Detection(box=(200, 200, 240, 240), score=0.9, class_id=5, class_name="tiger")])
+        tracks = tracker.update(
+            [Detection(box=(200, 200, 240, 240), score=0.9, class_id=5, class_name="tiger")]
+        )
         # two distinct tracks should now exist (first aged, second new)
         self.assertEqual(len(tracker.active_tracks()), 2)
         self.assertNotEqual(tracks[0].track_id if tracks else None, None)
@@ -90,7 +98,9 @@ class TestIouTracker(unittest.TestCase):
         self.assertEqual(tracker.active_tracks(), [])
 
     def test_presence_history_records_misses(self):
-        tracker = IouTracker(iou_match_threshold=0.3, max_age_frames=5, min_hits_to_confirm=1, presence_window=3)
+        tracker = IouTracker(
+            iou_match_threshold=0.3, max_age_frames=5, min_hits_to_confirm=1, presence_window=3
+        )
         tracker.update([Detection(box=(10, 10, 50, 50), score=0.9, class_id=5, class_name="tiger")])
         tracks = tracker.update([])  # miss
         self.assertEqual(tracks[0].presence_history, [True, False])
