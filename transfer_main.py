@@ -28,7 +28,7 @@ from db.outbox import (
     mark_video_sent,
 )
 from logger_setup import configure_root, get_logger
-from network.base_station_client import BaseStationClient, BaseStationError, NullBaseStationClient
+from network.base_station_client import BaseStationError, build_client
 from network.transfer_state import TransferState
 from storage.local_file_cleanup import delete_local_file
 
@@ -43,12 +43,9 @@ def _handle_signal(signum, frame):  # noqa: ARG001
 
 
 def _build_client(cfg: dict):
-    bs = cfg.get("base_station", {})
-    url = bs.get("url", "")
-    if not url:
+    if not cfg.get("base_station", {}).get("url", ""):
         log.warning("transfer_config.base_station.url is empty; using NullBaseStationClient (logs only)")
-        return NullBaseStationClient()
-    return BaseStationClient(url, api_key=bs.get("api_key", ""), timeout_sec=float(bs.get("timeout_sec", 10.0)))
+    return build_client(cfg)
 
 
 def _event_to_payload(row: dict) -> dict:

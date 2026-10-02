@@ -60,10 +60,24 @@ def _import_onvif():
         ) from exc
 
 
+ONVIF_TIMEOUT_SEC = 5
+
+
+def _onvif_transport():
+    """zeep transport with a bounded timeout. zeep's default has no
+    operation timeout, so one unanswered SOAP call would block the
+    pipeline thread until the supervisor declares it hung (60 s) and
+    restarts the whole process. With this, the call fails after 5 s and
+    is logged like any other ONVIF error."""
+    from zeep.transports import Transport  # type: ignore
+
+    return Transport(timeout=ONVIF_TIMEOUT_SEC, operation_timeout=ONVIF_TIMEOUT_SEC)
+
+
 class OnvifLensCamera:
     def __init__(self, host: str, port: int, username: str, password: str):
         ONVIFCamera = _import_onvif()
-        self._cam = ONVIFCamera(host, port, username, password)
+        self._cam = ONVIFCamera(host, port, username, password, transport=_onvif_transport())
         self._media = self._cam.create_media_service()
         self._ptz = self._cam.create_ptz_service()
         self._imaging = self._cam.create_imaging_service()

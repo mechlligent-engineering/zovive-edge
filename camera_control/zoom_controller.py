@@ -203,6 +203,31 @@ class AnimalZoomController:
         self.state = ZoomState.RETURNING
         self._deadline = now + self.zoom_settle_sec
 
+    def abort(self, now: float | None = None) -> None:
+        """Drop any zoom session without alerting and head back to wide.
+
+        Used when the pipeline thread crashed and is being restarted: the
+        session's evidence may be what caused the crash, and the animal is
+        normally re-detected once the lens is wide again. Goes through the
+        normal RETURNING -> FOCUSING -> WIDE path so frames stay skipped
+        until the lens has settled and refocused.
+        """
+        now = now if now is not None else self.clock()
+        dropped = self.session
+        self.session = None
+        returning_already = self.state == ZoomState.RETURNING or (
+            self.state == ZoomState.FOCUSING and self._focus_then == ZoomState.WIDE
+        )
+        if self.state == ZoomState.WIDE or returning_already:
+            return
+        self.camera.zoom_to(self.plan_config.wide_zoom_level)
+        self.state = ZoomState.RETURNING
+        self._deadline = now + self.zoom_settle_sec
+        log.warning(
+            "zoom session aborted; returning to wide view",
+            extra={"track_id": dropped.track_id if dropped else None},
+        )
+
     def remember(
         self,
         box: tuple[float, float, float, float],

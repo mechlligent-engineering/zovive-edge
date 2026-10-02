@@ -1,7 +1,27 @@
-# Placeholder for the systemd watchdog integration (batch 2:
-# watchdog/ + systemd unit WatchdogSec + sd_notify from edge_main.py).
-# Documented now so the field report's "disabled RuntimeWatchdogSec"
-# investigation has a clear place to record the eventual re-enabled value.
+# Health reporting and self-recovery. The systemd watchdog itself is set
+# in systemd/zovive-detect.service (WatchdogSec); see docs/WATCHDOG.md.
 watchdog:
-  enabled: false
-  heartbeat_interval_sec: 15
+  enabled: false                    # unused; kept for older configs
+  heartbeat_interval_sec: 15        # clamped to 5..3600 by health_main.py
+  # Local heartbeat rows (diagnostics only) older than this are deleted
+  # hourly. Events, snapshots and clips are never touched by this.
+  heartbeat_retention_days: 7
+  # edge_main.py writes its health to var/edge_status.json this often...
+  edge_status_write_interval_sec: 5
+  # ...and health_main.py treats any timestamp older than this as
+  # frozen / stale.
+  edge_status_stale_sec: 30
+  # In-process worker supervision for edge_main.py (watchdog/supervisor.py).
+  supervisor:
+    # A worker thread that raises is restarted after a backoff of
+    # initial_backoff_sec * 2^n, capped at max_backoff_sec...
+    initial_backoff_sec: 1
+    max_backoff_sec: 60
+    # ...until it has been restarted max_restarts times within
+    # restart_window_sec; the next crash exits the process so systemd
+    # starts it fresh (zovive-detect.service, RestartSec=30).
+    max_restarts: 5
+    restart_window_sec: 600
+    # A worker whose loop has made no progress for this long is hung; a
+    # hung thread cannot be replaced in-process, so the process exits.
+    hang_threshold_sec: 60
