@@ -46,6 +46,18 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "ALTER TABLE events ADD COLUMN video_deleted_ts REAL",
         ],
     ),
+    # Adds per-artifact Base Station ACK tracking (storage/retention_manager.py
+    # deletes only media whose own *_acked_ts is set). Deliberately no
+    # backfill: rows already marked 'sent' cannot prove the base station got
+    # the file (NullBaseStationClient, metadata-only sends), so they keep
+    # NULL and are never deleted automatically.
+    (
+        4,
+        [
+            "ALTER TABLE events ADD COLUMN snapshot_acked_ts REAL",
+            "ALTER TABLE events ADD COLUMN video_acked_ts REAL",
+        ],
+    ),
 ]
 
 

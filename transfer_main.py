@@ -66,8 +66,19 @@ def _event_to_payload(row: dict) -> dict:
 
 
 def _send_pending_images(
-    client, state: TransferState, batch_size: int, delete_after_ack: bool = False
+    client,
+    state: TransferState,
+    batch_size: int,
+    delete_after_ack: bool = False,
+    record_ack: bool | None = None,
 ) -> None:
+    """Send pending image alerts. ``record_ack``: the client is a real base
+    station, so a successful send of a request carrying the snapshot is
+    recorded as that snapshot's ACK (db/outbox.py snapshot_acked_ts).
+    Defaults to ``delete_after_ack``, which run() only enables with a real
+    base station. Local deletion always requires that ACK."""
+    if record_ack is None:
+        record_ack = delete_after_ack
     pending = get_pending(limit=batch_size)
     for row in pending:
         event_id = row["event_id"]
@@ -83,16 +94,17 @@ def _send_pending_images(
                 log.warning("snapshot file missing, sending metadata only", extra={"event_id": event_id})
 
             client.send_event(_event_to_payload(row), snapshot_bytes=snapshot_bytes)
-            mark_sent(event_id)
+            # A metadata-only send (snapshot unreadable) is not an ACK of the
+            # snapshot: the base station never got the image.
+            snapshot_acked = record_ack and snapshot_bytes is not None
+            mark_sent(event_id, snapshot_acked=snapshot_acked)
             state.clear(event_id)
-            log.info("event sent", extra={"event_id": event_id})
+            log.info("event sent", extra={"event_id": event_id, "snapshot_acked": snapshot_acked})
 
-            # ACK received (the send above succeeded) -> Pi storage is
-            # temporary, so the local copy can go now that the base
-            # station has it. Only if we actually had a file to send in
-            # the first place (snapshot_bytes is not None) — nothing to
-            # clean up otherwise.
-            if delete_after_ack and snapshot_bytes is not None:
+            # ACK recorded (same UPDATE as 'sent') -> the local copy may go
+            # now if delete-right-after-ACK is enabled. If recording failed,
+            # mark_sent raised and nothing below runs: the file stays.
+            if delete_after_ack and snapshot_acked:
                 if delete_local_file(snapshot_path):
                     mark_snapshot_deleted(event_id)
                     log.info("local snapshot deleted after ack", extra={"event_id": event_id})
@@ -107,8 +119,16 @@ def _send_pending_images(
 
 
 def _send_pending_videos(
-    client, video_state: TransferState, batch_size: int, timeout_sec: float, delete_after_ack: bool = False
+    client,
+    video_state: TransferState,
+    batch_size: int,
+    timeout_sec: float,
+    delete_after_ack: bool = False,
+    record_ack: bool | None = None,
 ) -> None:
+    """Send pending clips; ``record_ack`` as in _send_pending_images."""
+    if record_ack is None:
+        record_ack = delete_after_ack
     # Keyed distinctly from the image alert's TransferState entries
     # (same event_id would otherwise collide two independent retry
     # timelines into one backoff schedule).
@@ -132,12 +152,15 @@ def _send_pending_videos(
 
         try:
             client.send_video(event_id, video_bytes, timeout_sec=timeout_sec)
-            mark_video_sent(event_id)
+            mark_video_sent(event_id, acked=record_ack)
             video_state.clear(state_key)
-            log.info("video sent", extra={"event_id": event_id, "video_bytes": len(video_bytes)})
+            log.info(
+                "video sent",
+                extra={"event_id": event_id, "video_bytes": len(video_bytes), "video_acked": record_ack},
+            )
 
-            # ACK received -> delete the local clip; see _send_pending_images.
-            if delete_after_ack:
+            # ACK recorded -> delete the local clip; see _send_pending_images.
+            if delete_after_ack and record_ack:
                 if delete_local_file(video_path):
                     mark_video_deleted(event_id)
                     log.info("local video deleted after ack", extra={"event_id": event_id})
@@ -205,10 +228,18 @@ def run(max_cycles: int | None = None) -> None:
     )
     cycles = 0
     while not _shutdown:
-        _send_pending_images(client, state, batch_size, delete_local_files_after_ack)
+        # Only a real base station can ACK media; the Null client never does.
+        _send_pending_images(
+            client, state, batch_size, delete_local_files_after_ack, record_ack=base_station_configured
+        )
         if video_upload_enabled:
             _send_pending_videos(
-                client, video_state, video_batch_size, video_upload_timeout_sec, delete_local_files_after_ack
+                client,
+                video_state,
+                video_batch_size,
+                video_upload_timeout_sec,
+                delete_local_files_after_ack,
+                record_ack=base_station_configured,
             )
 
         cycles += 1

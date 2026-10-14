@@ -1,8 +1,23 @@
-keep_after_ack_hours: 0          # 0 = purge blobs immediately on verified FINAL_ACK
-purge_cache_with_evidence: true  # derivatives and staging go with the blobs
-min_free_gb: 20
-max_evidence_gb: 120
-eviction_order: [acked, oldest_low_confidence, oldest_unacked]
-never_evict_unacked_before_hours: 72
-alert_on_unacked_count: 500
+# Local evidence retention, applied by storage/retention_manager.py
+# (systemd: zovive-retention.timer daily, zovive-storage-pressure.timer).
+#
+# A snapshot or clip is deleted only after the base station ACKed that
+# file itself (events.snapshot_acked_ts / video_acked_ts). Unacknowledged
+# evidence is never deleted automatically, whatever its age or the disk usage.
+enabled: true
+
+# Daily check: delete ACKed media recorded and ACKed at least this long ago.
+retention_days: 14
+
+# Usage of the filesystem holding the snapshot and clip directories.
+storage_pressure:
+  trigger_percent: 82   # at or above: delete ACKed media oldest first, any age
+  target_percent: 79    # stop once usage is at or below this
+
+# Report unACKed media whose event is older than this (heartbeat, logs).
+overdue_unacknowledged_days: 14
+
+# Not used by retention_manager.py; kept for storage/purge_service.py and
+# storage/orphan_scanner.py (not implemented yet).
+purge_cache_with_evidence: true
 orphan_scan_interval_min: 60

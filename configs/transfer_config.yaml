@@ -26,11 +26,10 @@ transfer:
   video_upload_timeout_sec: 60.0
   video_retry_initial_backoff_sec: 5.0
   video_retry_max_backoff_sec: 300.0
-  # Pi storage vs. base station storage model: the Pi's images/videos
-  # are temporary, the base station's copies are the permanent ones.
-  # On ACK (a successful send_event/send_video), the local file is
-  # deleted; on failure, it's kept and retried (unaffected by this
-  # flag either way — that part is unconditional). transfer_main.py
-  # forces this off regardless of the value here if base_station.url
-  # above is empty, since there's then no real remote copy to rely on.
-  delete_local_files_after_ack: true
+  # Delete the local file the moment its own ACK is recorded. Off: ACKed
+  # media is kept on the Pi for retention_policy.yaml's retention_days and
+  # then deleted by storage/retention_manager.py (or earlier under storage
+  # pressure). Turning this on bypasses that local retention window. Never
+  # affects unACKed media, and transfer_main.py forces it off when
+  # base_station.url above is empty.
+  delete_local_files_after_ack: false

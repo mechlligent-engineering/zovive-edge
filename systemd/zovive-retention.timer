@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily ZOVIVE media retention check (ACKed media older than 14 days)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=30min
+# Run at boot if the Pi was off at the scheduled time.
+Persistent=true
+Unit=zovive-retention@daily.service
+
+[Install]
+WantedBy=timers.target

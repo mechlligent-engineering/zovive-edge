@@ -56,14 +56,21 @@ class BaseStationClient:
                     headers={"Authorization": self._headers().get("Authorization", "")},
                     timeout=self.timeout_sec,
                     verify=self.verify,
+                    allow_redirects=False,
                 )
             else:
                 resp = requests.post(
-                    url, json=event, headers=self._headers(), timeout=self.timeout_sec, verify=self.verify
+                    url,
+                    json=event,
+                    headers=self._headers(),
+                    timeout=self.timeout_sec,
+                    verify=self.verify,
+                    allow_redirects=False,
                 )
             resp.raise_for_status()
         except requests.RequestException as exc:
             raise BaseStationError(f"send_event failed: {exc}") from exc
+        _require_2xx(resp, "send_event")
 
     def send_video(self, event_id: str, video_bytes: bytes, timeout_sec: float | None = None) -> None:
         """POST the event video clip (pipeline/clip_extractor.py's MP4)
@@ -85,10 +92,12 @@ class BaseStationClient:
                 headers={"Authorization": self._headers().get("Authorization", "")},
                 timeout=timeout_sec if timeout_sec is not None else self.timeout_sec,
                 verify=self.verify,
+                allow_redirects=False,
             )
             resp.raise_for_status()
         except requests.RequestException as exc:
             raise BaseStationError(f"send_video failed: {exc}") from exc
+        _require_2xx(resp, "send_video")
 
     def send_heartbeat(self, payload: dict) -> None:
         url = f"{self.base_url}/api/heartbeat"
@@ -99,6 +108,17 @@ class BaseStationClient:
             resp.raise_for_status()
         except requests.RequestException as exc:
             raise BaseStationError(f"send_heartbeat failed: {exc}") from exc
+
+
+def _require_2xx(resp: requests.Response, what: str) -> None:
+    """A media upload counts as received only on a direct 2xx answer.
+    Redirects are not followed for uploads: requests would turn a 301/302
+    into a GET without the file, and that GET's 200 must not look like an
+    ACK (storage/retention_manager.py deletes media on ACK)."""
+    if not 200 <= resp.status_code < 300:
+        raise BaseStationError(
+            f"{what} failed: unexpected HTTP {resp.status_code} (redirects are not followed)"
+        )
 
 
 def _to_json(obj: dict) -> str:

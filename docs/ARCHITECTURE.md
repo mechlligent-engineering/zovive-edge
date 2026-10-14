@@ -92,28 +92,29 @@ its own retry timeline (`video_status`, independent of the image
 alert's `status`) — a lost or slow clip never risks the durability
 guarantee the image alert already has once it's in `db/outbox`.
 
-## ACK-triggered local cleanup
+## ACK-based local retention
 
-The intended storage model: the Pi holds temporary copies (images,
-videos, SQLite metadata) while the base station holds the permanent
-ones (images, and optionally videos, plus the event database). Once a
-send gets an ACK, the Pi's copy of that artifact is no longer needed;
-if it doesn't, the Pi's copy is the only copy and must be kept.
+The Pi holds temporary copies of the evidence; the base station holds the
+permanent ones. A local snapshot or clip may be deleted only once the base
+station has ACKed that file itself:
 
-`transfer_main.py`'s `_send_pending_images`/`_send_pending_videos` call
-`storage/local_file_cleanup.delete_local_file()` right after
-`mark_sent()`/`mark_video_sent()` — i.e. only on the success path,
-never speculatively — and record the deletion in `db/outbox`'s
-`snapshot_deleted_ts`/`video_deleted_ts` columns. A failed send takes
-the existing `except BaseStationError` path unchanged: nothing is
-deleted, the file stays, and the existing per-event backoff
-(`network/transfer_state.py`) retries it. This is gated by
-`transfer_config.yaml`'s `transfer.delete_local_files_after_ack`
-(default `true`), which `transfer_main.run()` forces off whenever
-`base_station.url` is empty — `NullBaseStationClient` "succeeds"
-unconditionally so the rest of the pipeline can be exercised without a
-real base station, and without this guard that would delete every
-evidence file immediately with nothing backing it up anywhere.
+- `transfer_main.py` records `snapshot_acked_ts` / `video_acked_ts` (db/outbox)
+  in the same UPDATE that marks the artifact sent, and only when a real base
+  station answered 2xx, without a redirect, to a request that carried the
+  complete file. A metadata-only send, the `NullBaseStationClient` (empty
+  `base_station.url`) and every row sent before schema v4 leave it NULL.
+- `storage/retention_manager.py` deletes ACKed media recorded and ACKed at
+  least 14 days ago (daily, `zovive-retention.timer`), and, when the
+  filesystem holding the media reaches 82 %, ACKed media oldest first at any
+  age until it is back to 79 % (`zovive-storage-pressure.timer`). Thresholds
+  live in `configs/retention_policy.yaml`.
+- Unacknowledged evidence is never deleted automatically. It is counted
+  (overdue after 14 days) in `retention_status.json` and the heartbeat's
+  `retention` section.
+
+`transfer_config.yaml`'s `delete_local_files_after_ack` (now `false`) still
+deletes a file right after its own ACK when turned on, bypassing the 14-day
+local window; `transfer_main.run()` forces it off without a base station URL.
 
 ## Why gating exists
 

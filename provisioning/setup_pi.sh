@@ -11,5 +11,6 @@ set -euo pipefail
 # 7. install systemd units, tmpfiles, logrotate, chrony
 # 8. python -m db.init_db
 # 9. systemctl enable --now zovive-detect zovive-transfer zovive-health
+#    systemctl enable --now zovive-retention.timer zovive-storage-pressure.timer
 
 echo "TODO: implement. Read docs/STORAGE_LAYOUT.md before running partition_nvme.sh."

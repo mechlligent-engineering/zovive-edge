@@ -1,0 +1,11 @@
+[Unit]
+Description=ZOVIVE storage-pressure check (cleanup at 82% media filesystem usage)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=zovive-retention@pressure.service
+
+[Install]
+WantedBy=timers.target

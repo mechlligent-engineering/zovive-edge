@@ -1,11 +1,12 @@
 """Tests db/migrations.py's forward migrations: version 1 -> 2 (adds
-video_path/video_status, from the video-upload enhancement) and
+video_path/video_status, from the video-upload enhancement),
 2 -> 3 (adds snapshot_deleted_ts/video_deleted_ts, from the
-ACK-triggered local-file-cleanup enhancement).
+ACK-triggered local-file-cleanup enhancement) and 3 -> 4 (adds the
+per-artifact snapshot_acked_ts/video_acked_ts, never backfilled).
 
 The important case here isn't the fresh-install path (that's covered
 implicitly by every other test that calls init_db() — schema.sql
-already creates every column and seeds schema_version=3 directly).
+already creates every column and seeds schema_version=4 directly).
 It's the *upgrade* path: a database that already exists on a deployed
 node, at an older schema_version, without the newer columns. That's
 simulated here by hand-building older-shaped schemas, so this test
@@ -78,11 +79,11 @@ class TestVideoColumnMigration(unittest.TestCase):
         self.assertEqual(current_version(self.conn), 1)
 
     def test_migrate_from_v1_lands_on_latest_with_all_columns_and_no_data_loss(self):
-        # A v1 database should walk both the v1->v2 and v2->v3 steps in
-        # one migrate() call, ending at the latest schema.
+        # A v1 database should walk every step (v1->v2->v3->v4) in one
+        # migrate() call, ending at the latest schema.
         migrate(self.conn)
 
-        self.assertEqual(current_version(self.conn), 3)
+        self.assertEqual(current_version(self.conn), 4)
 
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(events)").fetchall()}
         for expected in (
@@ -94,6 +95,8 @@ class TestVideoColumnMigration(unittest.TestCase):
             "video_sent_ts",
             "snapshot_deleted_ts",
             "video_deleted_ts",
+            "snapshot_acked_ts",
+            "video_acked_ts",
         ):
             self.assertIn(expected, cols)
 
@@ -104,11 +107,13 @@ class TestVideoColumnMigration(unittest.TestCase):
         self.assertIsNone(row["video_path"])
         self.assertIsNone(row["snapshot_deleted_ts"])
         self.assertIsNone(row["video_deleted_ts"])
+        self.assertIsNone(row["snapshot_acked_ts"])
+        self.assertIsNone(row["video_acked_ts"])
 
     def test_migrate_is_idempotent(self):
         migrate(self.conn)
         migrate(self.conn)  # must not raise (e.g. "duplicate column") on a second call
-        self.assertEqual(current_version(self.conn), 3)
+        self.assertEqual(current_version(self.conn), 4)
 
 
 _BATCH1_V2_SCHEMA = """
@@ -162,11 +167,68 @@ class TestDeletedTsColumnMigration(unittest.TestCase):
 
         migrate(self.conn)
 
-        self.assertEqual(current_version(self.conn), 3)
+        self.assertEqual(current_version(self.conn), 4)
         row = self.conn.execute("SELECT * FROM events WHERE event_id = 'evt-v2'").fetchone()
         self.assertEqual(row["video_status"], "sent", "existing video_status must be untouched by this step")
         self.assertIsNone(row["snapshot_deleted_ts"])
         self.assertIsNone(row["video_deleted_ts"])
+
+
+_SCHEMA_SQL = Path(__file__).resolve().parent.parent / "db" / "schema.sql"
+
+
+class TestAckColumnMigration(unittest.TestCase):
+    """The 3 -> 4 step on a deployed v3 database: rows already marked
+    'sent' (possibly by the NullBaseStationClient or as metadata only) must
+    not gain an ACK, and nothing else may change."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.conn = sqlite3.connect(str(Path(self.tmpdir.name) / "v3.sqlite3"))
+        self.conn.row_factory = sqlite3.Row
+        # The v4 schema minus the two ACK columns, at version 3.
+        v3_schema = (
+            _SCHEMA_SQL.read_text(encoding="utf-8")
+            .replace("    video_deleted_ts     REAL,", "    video_deleted_ts     REAL")
+            .replace("    snapshot_acked_ts   REAL,\n    video_acked_ts      REAL\n", "")
+            .replace("('schema_version', '4')", "('schema_version', '3')")
+        )
+        self.assertNotIn("acked_ts   REAL,", v3_schema)
+        self.conn.executescript(v3_schema)
+        self.conn.execute(
+            "INSERT INTO events (event_id, track_id, camera_id, animal_name, confidence, snapshot_path, "
+            "status, sent_ts, video_path, video_status, video_sent_ts, snapshot_deleted_ts, created_ts) VALUES "
+            "('evt-sent', 't', 'cam01', 'elephant', 0.9, '/data/snapshots/a.jpg', 'sent', 1500.0, "
+            "'/data/clips/a.mp4', 'sent', 1600.0, NULL, 1000.0)"
+        )
+        self.conn.commit()
+
+    def tearDown(self):
+        self.conn.close()
+        self.tmpdir.cleanup()
+
+    def test_starts_without_ack_columns(self):
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(events)").fetchall()}
+        self.assertEqual(current_version(self.conn), 3)
+        self.assertNotIn("snapshot_acked_ts", cols)
+
+    def test_sent_rows_keep_no_ack_and_data_is_preserved(self):
+        before = dict(self.conn.execute("SELECT * FROM events WHERE event_id = 'evt-sent'").fetchone())
+        self.assertEqual(migrate(self.conn), 4)
+        after = dict(self.conn.execute("SELECT * FROM events WHERE event_id = 'evt-sent'").fetchone())
+        self.assertIsNone(after.pop("snapshot_acked_ts"), "historic 'sent' must not become ACKed")
+        self.assertIsNone(after.pop("video_acked_ts"), "historic 'sent' must not become ACKed")
+        self.assertEqual(after, before)
+
+    def test_fresh_schema_is_already_v4(self):
+        fresh = sqlite3.connect(":memory:")
+        fresh.row_factory = sqlite3.Row
+        fresh.executescript(_SCHEMA_SQL.read_text(encoding="utf-8"))
+        self.assertEqual(current_version(fresh), 4)
+        self.assertEqual(migrate(fresh), 4)
+        cols = {r[1] for r in fresh.execute("PRAGMA table_info(events)").fetchall()}
+        self.assertTrue({"snapshot_acked_ts", "video_acked_ts"} <= cols)
+        fresh.close()
 
 
 if __name__ == "__main__":

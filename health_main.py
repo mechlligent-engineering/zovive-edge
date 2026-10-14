@@ -147,6 +147,9 @@ def collect_heartbeat(camera_id: str, stale_after_sec: float = 30.0, now: float 
         "throttled": throttle["raw"],
         "throttle": {"flags": throttle["flags"], "error": throttle["error"]},
         "edge": evaluate_edge_health(edge_raw, now, stale_after_sec),
+        # Last cleanup runs and the unACKed evidence backlog, written by
+        # storage/retention_manager.py; None until its first run.
+        "retention": read_status_file(paths.RETENTION_STATUS_PATH),
     }
 
 

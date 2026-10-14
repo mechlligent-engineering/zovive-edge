@@ -47,7 +47,15 @@ CREATE TABLE IF NOT EXISTS events (
     -- This row itself is never deleted either way — it's the permanent
     -- local *metadata* record, only the heavy binary files get purged.
     snapshot_deleted_ts REAL,
-    video_deleted_ts     REAL
+    video_deleted_ts     REAL,
+    -- Per-artifact proof of receipt (storage/retention_manager.py deletes
+    -- only media whose own column is set). Written in the same UPDATE that
+    -- marks the artifact sent, and only when a real base station answered
+    -- 2xx, without a redirect, to a request that carried the complete file
+    -- (transfer_main.py). NULL = no proof: a metadata-only send, the
+    -- NullBaseStationClient, or a row sent before this column existed.
+    snapshot_acked_ts   REAL,
+    video_acked_ts      REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
@@ -76,4 +84,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', '3');
+INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', '4');
