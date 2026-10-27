@@ -38,7 +38,7 @@ from pipeline.zone_filter import ZoneFilter
 from queues.alert_queue import AlertQueue
 from queues.detection_queue import DetectionBatch, DetectionQueue
 from storage.evidence_store import EvidenceStore
-from tests.helpers import AlwaysClassifier, blank_frame
+from tests.helpers import blank_frame
 from transfer_main import _send_pending_videos
 
 
@@ -75,7 +75,6 @@ class TestVideoPipelineIntegration(unittest.TestCase):
             "node": {"camera_id": "cam01", "camera_name": "Test Cam", "forest_name": "Test Forest", "gps": {}}
         }
         dispatcher = AlertDispatcher(alert_queue, evidence_store=evidence_store, node_config=node_cfg)
-        classifier = AlwaysClassifier("tiger", 0.92)
         zoom = self._build_zoom()
 
         clip_ready = threading.Event()
@@ -115,7 +114,6 @@ class TestVideoPipelineIntegration(unittest.TestCase):
         stop_event = threading.Event()
         _pipeline_loop(
             detection_queue,
-            classifier,
             zoom,
             tracker,
             track_sm,
@@ -123,9 +121,7 @@ class TestVideoPipelineIntegration(unittest.TestCase):
             motion_gate,
             snapshot_store,
             dispatcher,
-            inf_cfg={
-                "classifier": {"max_crops_per_track": 5, "min_confidence": 0.5, "voting_strategy": "average"}
-            },
+            inf_cfg={"stage2": {"min_confidence": 0.5, "voting_strategy": "average"}},
             model_version="test-v1",
             stop_event=stop_event,
             max_cycles=5,

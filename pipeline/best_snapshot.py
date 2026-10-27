@@ -1,7 +1,7 @@
 """Keeps the best few crops seen for each track while it's active, so
-stage2_verifier.py has good material to classify and alert_dispatcher
-has a presentable snapshot to send — instead of just using whichever
-frame happened to trigger the event.
+alert_dispatcher has a presentable snapshot to send — instead of just
+using whichever frame happened to trigger the event. (The species itself
+comes from the detector's per-frame votes, pipeline/stage2_verifier.py.)
 
 "Best" = sharp and reasonably large, scored as sharpness * area, which
 in practice favors close, in-focus crops over small or blurry ones.

@@ -67,8 +67,8 @@ def clip_box(
 
 
 def crop_box(image: np.ndarray, box: tuple[float, float, float, float], pad_ratio: float = 0.1) -> np.ndarray:
-    """Crop `box` out of `image` with a small margin so the classifier
-    sees a bit of context around the detector's box, not just its
+    """Crop `box` out of `image` with a small margin so the snapshot crop
+    shows a bit of context around the detector's box, not just its
     exact edges (which are often tight/clipped)."""
     h, w = image.shape[:2]
     x1, y1, x2, y2 = box

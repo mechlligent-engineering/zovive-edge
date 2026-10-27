@@ -83,9 +83,3 @@ def decode_yolo_detections(
             )
         )
     return detections
-
-
-def softmax(x: np.ndarray) -> np.ndarray:
-    x = x - np.max(x)
-    e = np.exp(x)
-    return e / e.sum()

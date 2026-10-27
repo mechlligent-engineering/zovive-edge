@@ -428,7 +428,7 @@ def edge_startup(build: mock.Mock) -> Iterator[None]:
     with (
         mock.patch.object(edge_main, "init_db"),
         mock.patch.object(edge_main, "migrate"),
-        mock.patch.object(edge_main, "build_detector_and_classifier", build),
+        mock.patch.object(edge_main, "build_detector", build),
     ):
         yield
 

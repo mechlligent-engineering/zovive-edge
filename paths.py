@@ -50,6 +50,15 @@ MODELS_DIR = PROJECT_ROOT / "models"
 MODELS_BACKUP_DIR = MODELS_DIR / "backup"
 MODEL_MANIFEST = MODELS_DIR / "manifest.json"
 
+
+def model_file(path: str | Path) -> Path:
+    """Where a model named in inference_config.yaml lives: a relative path
+    is taken under MODELS_DIR (never the working directory, which differs
+    between systemd, tools and tests); an absolute path is kept as is."""
+    p = Path(path).expanduser()
+    return p if p.is_absolute() else MODELS_DIR / p
+
+
 # --- Runtime data (under DATA_ROOT so it's easy to point at a big disk) --
 
 DB_DIR = DATA_ROOT / "db"

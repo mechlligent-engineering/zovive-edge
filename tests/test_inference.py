@@ -5,7 +5,7 @@ import numpy as np
 from inference.base import Detection
 from inference.bytetrack_wrapper import IouTracker, iou
 from inference.preprocess import letterbox, unletterbox_box
-from inference.yolo_postprocess import decode_yolo_detections, softmax
+from inference.yolo_postprocess import decode_yolo_detections
 from tests.helpers import blank_frame
 
 
@@ -60,10 +60,6 @@ class TestYoloPostprocess(unittest.TestCase):
         arr = np.array([[50, 50, 20, 20, 0.1, 0.2]], dtype=np.float32).T
         dets = decode_yolo_detections(arr, class_names, 1.0, (0, 0), (100, 100), conf_threshold=0.5)
         self.assertEqual(dets, [])
-
-    def test_softmax_sums_to_one(self):
-        scores = softmax(np.array([1.0, 2.0, 3.0]))
-        self.assertAlmostEqual(float(scores.sum()), 1.0, places=5)
 
 
 class TestIouTracker(unittest.TestCase):

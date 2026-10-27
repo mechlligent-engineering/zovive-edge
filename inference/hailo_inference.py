@@ -6,8 +6,10 @@ zovive-ml's export pipeline: .pt -> ONNX -> Hailo Dataflow Compiler -> .hef).
 device, and the wheel isn't on PyPI), so the import is deferred into
 __init__ rather than module load time — the module stays importable
 everywhere (for tests that only check config wiring), and only
-*constructing* HailoDetector/HailoClassifier on a non-Pi machine raises
-a clear InferenceBackendError instead of an ImportError stack trace.
+*constructing* HailoDetector can fail: FileNotFoundError
+for a missing .hef, and a clear InferenceBackendError for everything on
+the HailoRT side (not installed, no/busy device, a bad .hef). edge_main
+falls back to the ONNX CPU backend on either.
 
 IMPORTANT: this follows the HailoRT Python API shape as of HailoRT
 4.x (HEF / VDevice / InferVStreams). Verify method names against
@@ -20,13 +22,15 @@ real hardware.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import numpy as np
 
-from inference.base import ClassificationResult, Classifier, Detection, Detector, InferenceBackendError
+from inference.base import Detection, Detector, InferenceBackendError
+from inference.class_names import checked_class_names
 from inference.npu_scheduler import NpuScheduler, default_scheduler
 from inference.preprocess import crop_box, letterbox  # noqa: F401 (crop_box re-exported for callers)
-from inference.yolo_postprocess import decode_yolo_detections, softmax
+from inference.yolo_postprocess import decode_yolo_detections
 
 log = logging.getLogger(__name__)
 
@@ -45,34 +49,48 @@ def _import_hailo():
 
 
 class _HailoRunner:
-    """Shared HEF-loading + single-input/single-output inference helper
-    used by both HailoDetector and HailoClassifier."""
+    """HEF-loading + single-input/single-output inference helper behind
+    HailoDetector."""
 
     def __init__(self, hef_path: str, scheduler: NpuScheduler):
+        # Checked first, so a model that was never deployed is reported as
+        # exactly that, whether or not HailoRT is installed.
+        if not Path(hef_path).is_file():
+            raise FileNotFoundError(f"HEF file not found: {hef_path}")
         hpf = _import_hailo()
         self._hpf = hpf
         self.scheduler = scheduler
+        self.target = None
 
-        self.hef = hpf.HEF(hef_path)
-        self.target = hpf.VDevice()
-        configure_params = hpf.ConfigureParams.create_from_hef(
-            self.hef, interface=hpf.HailoStreamInterface.PCIe
-        )
-        self.network_group = self.target.configure(self.hef, configure_params)[0]
-        self.network_group_params = self.network_group.create_params()
+        try:
+            self.hef = hpf.HEF(hef_path)
+            self.target = hpf.VDevice()
+            configure_params = hpf.ConfigureParams.create_from_hef(
+                self.hef, interface=hpf.HailoStreamInterface.PCIe
+            )
+            self.network_group = self.target.configure(self.hef, configure_params)[0]
+            self.network_group_params = self.network_group.create_params()
 
-        self.input_vstream_info = self.hef.get_input_vstream_infos()[0]
-        self.output_vstream_info = self.hef.get_output_vstream_infos()[0]
+            self.input_vstream_info = self.hef.get_input_vstream_infos()[0]
+            self.output_vstream_info = self.hef.get_output_vstream_infos()[0]
 
-        self.input_vstreams_params = hpf.InputVStreamParams.make_from_network_group(
-            self.network_group, quantized=False, format_type=hpf.FormatType.FLOAT32
-        )
-        self.output_vstreams_params = hpf.OutputVStreamParams.make_from_network_group(
-            self.network_group, quantized=False, format_type=hpf.FormatType.FLOAT32
-        )
+            self.input_vstreams_params = hpf.InputVStreamParams.make_from_network_group(
+                self.network_group, quantized=False, format_type=hpf.FormatType.FLOAT32
+            )
+            self.output_vstreams_params = hpf.OutputVStreamParams.make_from_network_group(
+                self.network_group, quantized=False, format_type=hpf.FormatType.FLOAT32
+            )
 
-        shape = self.input_vstream_info.shape  # (H, W, C)
-        self.input_size = int(shape[0])
+            shape = self.input_vstream_info.shape  # (H, W, C)
+            self.input_size = int(shape[0])
+        except Exception as exc:  # noqa: BLE001 - HailoRT's exception classes only exist on the Pi
+            # Bad .hef, no/busy device or a HailoRT API mismatch: release a
+            # device that was already opened, and report a backend error so
+            # the caller's CPU fallback runs.
+            self.close()
+            raise InferenceBackendError(
+                f"HailoRT could not load {hef_path}: {type(exc).__name__}: {exc}"
+            ) from exc
 
     def run(self, input_tensor: np.ndarray) -> np.ndarray:
         """`input_tensor`: HxWxC float32, NHWC (Hailo's native layout)."""
@@ -90,6 +108,8 @@ class _HailoRunner:
         return self.scheduler.run(_infer)
 
     def close(self) -> None:
+        if self.target is None:
+            return
         try:
             self.target.release()
         except Exception:  # noqa: BLE001 - best-effort cleanup
@@ -114,7 +134,7 @@ class HailoDetector(Detector):
         iou_threshold: float = 0.45,
         scheduler: NpuScheduler | None = None,
     ):
-        self.class_names = class_names
+        self.class_names = checked_class_names(class_names, hef_path)
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
         self._runner = _HailoRunner(hef_path, scheduler or default_scheduler)
@@ -132,42 +152,6 @@ class HailoDetector(Detector):
             orig_shape=frame.shape[:2],
             conf_threshold=self.conf_threshold,
             iou_threshold=self.iou_threshold,
-        )
-
-    def warmup(self) -> None:
-        dummy = np.zeros((self.input_size, self.input_size, 3), dtype=np.uint8)
-        self.infer(dummy)
-
-    def close(self) -> None:
-        self._runner.close()
-
-
-class HailoClassifier(Classifier):
-    def __init__(
-        self,
-        hef_path: str,
-        class_names: list[str],
-        scheduler: NpuScheduler | None = None,
-    ):
-        self.class_names = class_names
-        self._runner = _HailoRunner(hef_path, scheduler or default_scheduler)
-        self.input_size = self._runner.input_size
-
-    def infer(self, crop) -> ClassificationResult:
-        if crop is None or crop.size == 0 or min(crop.shape[:2]) == 0:
-            return ClassificationResult(class_id=-1, class_name="invalid_crop", confidence=0.0)
-
-        padded, _ratio, _pad = letterbox(crop, self.input_size)
-        tensor = _to_nhwc_float(padded)
-        raw = np.asarray(self._runner.run(tensor)).reshape(-1)
-        scores = raw if np.isclose(raw.sum(), 1.0, atol=1e-2) else softmax(raw)
-
-        class_id = int(np.argmax(scores))
-        return ClassificationResult(
-            class_id=class_id,
-            class_name=self.class_names[class_id] if class_id < len(self.class_names) else str(class_id),
-            confidence=float(scores[class_id]),
-            all_scores=scores.tolist(),
         )
 
     def warmup(self) -> None:

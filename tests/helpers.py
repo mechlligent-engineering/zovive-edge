@@ -15,7 +15,7 @@ from unittest import mock
 
 import numpy as np
 
-from inference.base import ClassificationResult, Classifier, Detection, Detector
+from inference.base import Detection, Detector
 from utils import config_loader
 
 # Fake camera credentials for tests that load configs/rtsp_config.yaml or
@@ -79,77 +79,6 @@ class ScriptedDetector(Detector):
         result = self.script[min(self._i, len(self.script) - 1)]
         self._i += 1
         return result
-
-
-class AlwaysClassifier(Classifier):
-    """Always classifies as `species` with `confidence`, regardless of
-    the crop — used where the test cares about pipeline wiring, not
-    classifier accuracy."""
-
-    def __init__(self, species: str, confidence: float, class_names: list[str] | None = None):
-        self.class_names = class_names or [
-            "deer",
-            "gaur",
-            "leopard",
-            "elephant",
-            "sloth_bear",
-            "tiger",
-            "wild_boar",
-        ]
-        self.species = species
-        self.confidence = confidence
-
-    def infer(self, crop) -> ClassificationResult:
-        scores = [0.0] * len(self.class_names)
-        idx = self.class_names.index(self.species) if self.species in self.class_names else 0
-        scores[idx] = self.confidence
-        remainder = (1.0 - self.confidence) / max(1, len(self.class_names) - 1)
-        for i in range(len(scores)):
-            if i != idx:
-                scores[i] = remainder
-        return ClassificationResult(
-            class_id=idx, class_name=self.species, confidence=self.confidence, all_scores=scores
-        )
-
-
-class ScriptedClassifier(Classifier):
-    """Returns a pre-programmed sequence of ClassificationResults, one
-    per call to infer() (repeats the last entry once exhausted) —
-    the classifier counterpart to ScriptedDetector above. Lets a test
-    drive stage2_verifier's voting strategies (average vs majority)
-    with an exact, known sequence of per-crop results instead of a
-    single fixed answer like AlwaysClassifier gives.
-    """
-
-    def __init__(self, script: list[ClassificationResult], class_names: list[str] | None = None):
-        self.class_names = class_names or [
-            "deer",
-            "gaur",
-            "leopard",
-            "elephant",
-            "sloth_bear",
-            "tiger",
-            "wild_boar",
-        ]
-        self.script = script
-        self._i = 0
-
-    def infer(self, crop) -> ClassificationResult:
-        if not self.script:
-            return ClassificationResult(class_id=-1, class_name="invalid_crop", confidence=0.0)
-        result = self.script[min(self._i, len(self.script) - 1)]
-        self._i += 1
-        return result
-
-
-def scored_result(class_names: list[str], species: str, confidence: float) -> ClassificationResult:
-    """Builds one ClassificationResult with a full softmax-like
-    `all_scores` vector, for feeding ScriptedClassifier — the winning
-    class gets `confidence`, the rest split the remainder evenly."""
-    idx = class_names.index(species)
-    scores = [(1.0 - confidence) / max(1, len(class_names) - 1)] * len(class_names)
-    scores[idx] = confidence
-    return ClassificationResult(class_id=idx, class_name=species, confidence=confidence, all_scores=scores)
 
 
 def make_detection(box=(100, 80, 180, 160), score=0.9, class_id=5, class_name="tiger") -> Detection:

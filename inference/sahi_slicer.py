@@ -13,7 +13,7 @@ This wraps `inference.base.Detector` rather than replacing it or
 branching inside `onnx_inference.py`/`hailo_inference.py`: `SahiDetector`
 takes any existing Detector instance (ONNX or Hailo, doesn't care
 which) and implements the exact same interface, so
-`edge_main.build_detector_and_classifier` can hand back a `SahiDetector`
+`edge_main.build_detector` can hand back a `SahiDetector`
 in place of a plain one and nothing downstream (stage1_gate, the
 tracker, stage2_verifier) has to know the difference. That's also why
 this module doesn't do its own NMS logic from scratch: it reuses

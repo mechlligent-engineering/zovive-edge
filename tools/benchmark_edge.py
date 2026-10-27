@@ -3,16 +3,16 @@
 
 Sections (--sections, comma-separated):
 
-  hef     Decision D13. For each .hef in configs/inference_config.yaml: its
-          input/output vstreams, whether the detector was compiled with
-          on-chip NMS, whether inference/yolo_postprocess.decode_yolo_detections
-          can read its output as-is, and whether detector + classifier can be
-          configured together on ONE Hailo-8 VDevice (HailoRT scheduler).
-  models  Latency of the detector at 720p and 4MP input, letterbox alone, the
-          classifier, and SAHI on a 4MP frame (every tile vs. one ROI around a
-          distant animal). Built with edge_main.build_detector_and_classifier,
-          so it measures exactly what edge_main would run, and the report shows
-          when that silently fell back from Hailo to the CPU.
+  hef     Decision D13. For the detector .hef in configs/inference_config.yaml
+          (the node's only model): its input/output vstreams, whether it was
+          compiled with on-chip NMS, and whether
+          inference/yolo_postprocess.decode_yolo_detections can read its
+          output as-is.
+  models  Latency of the detector at 720p and 4MP input, letterbox alone,
+          and SAHI on a 4MP frame (every tile vs. one ROI around a distant
+          animal). Built with edge_main.build_detector, so it measures exactly
+          what edge_main would run, and the report shows when that silently
+          fell back from Hailo to the CPU.
   decode  Decode fps and CPU of the configured sub and main streams
           (tools.camera_probe.measure_stream).
   soak    The real capture thread (RtspReader, or FileFrameSource for
@@ -57,7 +57,7 @@ import numpy as np
 import paths
 from capture.file_source import FileFrameSource
 from capture.rtsp_reader import RtspReader, build_rtsp_url
-from edge_main import _inference_loop, build_detector_and_classifier
+from edge_main import _inference_loop, build_detector
 from health_main import _pi_throttle_status
 from inference.base import Detection, Detector
 from inference.preprocess import letterbox
@@ -163,8 +163,8 @@ class TimedDetector(Detector):
 
 
 def _unwrap(detector: Detector) -> Detector:
-    """build_detector_and_classifier wraps the detector in SahiDetector when
-    SAHI is enabled in config; the benchmark times SAHI separately."""
+    """build_detector wraps the detector in SahiDetector when SAHI is
+    enabled in config; the benchmark times SAHI separately."""
     return detector.inner if isinstance(detector, SahiDetector) else detector
 
 
@@ -205,33 +205,6 @@ def _vstream_info(info: Any) -> dict:
     }
 
 
-def _try_shared_vdevice(hpf: Any, hefs: dict[str, Any]) -> dict:
-    """Configure every HEF on one VDevice with the HailoRT scheduler, the way
-    detector + classifier must share the single Hailo-8. Today's code opens
-    one VDevice per model (inference/hailo_inference.py _HailoRunner)."""
-    try:
-        params = hpf.VDevice.create_params()
-        params.scheduling_algorithm = hpf.HailoSchedulingAlgorithm.ROUND_ROBIN
-        vdevice = hpf.VDevice(params)
-    except Exception as exc:
-        return {"ok": False, "stage": "create_vdevice", "error": f"{type(exc).__name__}: {exc}"}
-    try:
-        for name, hef in hefs.items():
-            configure_params = hpf.ConfigureParams.create_from_hef(
-                hef, interface=hpf.HailoStreamInterface.PCIe
-            )
-            try:
-                vdevice.configure(hef, configure_params)
-            except Exception as exc:
-                return {"ok": False, "stage": f"configure:{name}", "error": f"{type(exc).__name__}: {exc}"}
-        return {"ok": True, "models": sorted(hefs)}
-    finally:
-        try:
-            vdevice.release()
-        except Exception:  # noqa: BLE001 - best effort; the process exits soon anyway
-            log.debug("VDevice.release failed", exc_info=True)
-
-
 def inspect_hefs(hef_paths: dict[str, str], num_classes: dict[str, int], hpf: Any = None) -> dict:
     if hpf is None:
         try:
@@ -239,7 +212,6 @@ def inspect_hefs(hef_paths: dict[str, str], num_classes: dict[str, int], hpf: An
         except ImportError as exc:
             return {"available": False, "error": f"hailo_platform not importable: {exc}"}
     report: dict[str, Any] = {"available": True, "hailort_version": _hailort_version(hpf), "models": {}}
-    hefs: dict[str, Any] = {}
     for name, path in hef_paths.items():
         entry: dict[str, Any] = {"path": str(path)}
         try:
@@ -255,12 +227,9 @@ def inspect_hefs(hef_paths: dict[str, str], num_classes: dict[str, int], hpf: An
                     and len(shapes) == len(entry["outputs"])
                     and raw_yolo_compatible(shapes, num_classes.get(name, 0))
                 )
-            hefs[name] = hef
         except Exception as exc:
             entry["error"] = f"{type(exc).__name__}: {exc}"
         report["models"][name] = entry
-    if len(hefs) >= 2:
-        report["shared_vdevice"] = _try_shared_vdevice(hpf, hefs)
     return report
 
 
@@ -269,7 +238,6 @@ def inspect_hefs(hef_paths: dict[str, str], num_classes: dict[str, int], hpf: An
 
 def bench_models(
     detector: Detector,
-    classifier: Any,
     iterations: int,
     image: np.ndarray | None = None,
     clock: Callable[[], float] = time.perf_counter,
@@ -278,7 +246,6 @@ def bench_models(
     input_size = int(getattr(detector, "input_size", 640))
     out: dict[str, Any] = {
         "detector_type": type(detector).__name__,
-        "classifier_type": type(classifier).__name__,
         "detector_input_size": input_size,
         "detector": {},
         "letterbox": {},
@@ -292,9 +259,6 @@ def bench_models(
         out["letterbox"][name] = latency_stats(
             time_calls(lambda f=frame: letterbox(f, input_size), iterations, clock)
         )
-    crop = make_frame(224, 224, image)
-    classifier.infer(crop)
-    out["classifier"] = latency_stats(time_calls(lambda: classifier.infer(crop), iterations, clock))
     return out
 
 
@@ -487,30 +451,29 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     if "hef" in sections:
-        det, cls = inf_cfg["detector"], inf_cfg["classifier"]
+        det = inf_cfg["detector"]
         _section(
             report,
             "hef",
             lambda: inspect_hefs(
-                {"detector": det["hef_path"], "classifier": cls["hef_path"]},
-                {"detector": len(det["classes"]), "classifier": len(cls["classes"])},
+                {"detector": str(paths.model_file(det["hef_path"]))},
+                {"detector": len(det["classes"])},
             ),
         )
 
-    detector = classifier = None
+    detector = None
     if "models" in sections or "soak" in sections:
         # Built after the hef section released its VDevice. Uses edge_main's
         # own builder, including its Hailo -> ONNX fallback.
         try:
-            detector, classifier = build_detector_and_classifier(node_cfg, inf_cfg)
+            detector = build_detector(node_cfg, inf_cfg)
             detector.warmup()
-            classifier.warmup()
         except Exception as exc:
-            log.exception("could not build detector/classifier")
+            log.exception("could not build the detector")
             report["models"] = {"error": f"{type(exc).__name__}: {exc}"}
 
     if "models" in sections and detector is not None:
-        _section(report, "models", lambda: bench_models(detector, classifier, args.iterations, image))
+        _section(report, "models", lambda: bench_models(detector, args.iterations, image))
         _section(report, "sahi", lambda: bench_sahi(detector, max(3, args.iterations // 5), image))
 
     if "decode" in sections:
@@ -542,12 +505,11 @@ def main(argv: list[str] | None = None) -> int:
 
         _section(report, "soak", run_soak)
 
-    for model in (detector, classifier):
-        if model is not None:
-            try:
-                model.close()
-            except Exception:  # noqa: BLE001 - shutting down anyway
-                log.debug("model close failed", exc_info=True)
+    if detector is not None:
+        try:
+            detector.close()
+        except Exception:  # noqa: BLE001 - shutting down anyway
+            log.debug("detector close failed", exc_info=True)
 
     text = json.dumps(report, indent=2, default=str)
     print(text)

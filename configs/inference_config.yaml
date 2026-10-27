@@ -1,9 +1,14 @@
-# Detector + classifier model paths and thresholds.
-# class order MUST match the order the detector/classifier were trained
-# with (see zovive-ml/dataset_generic/data.yaml and dataset_species).
+# Single-stage inference: one model, the 7-species detector
+# (ZOVIVE_FINAL_150E). Species come straight from its classes; there is
+# no second classifier model.
+# Model paths are file names under models/ (paths.MODELS_DIR), never
+# relative to the working directory; an absolute path is used as is.
+# `classes` MUST be in the detector's output order (its Ultralytics
+# model.names); an ONNX model's embedded names are checked against it
+# at load time.
 detector:
-  onnx_path: "models/detector.onnx"
-  hef_path: "models/detector.hef"
+  onnx_path: "detector.onnx"
+  hef_path: "detector.hef"
   input_size: 640
   classes:
     - deer
@@ -23,29 +28,21 @@ detector:
   # this long after its last alert (stops a sleeping tiger alerting forever).
   track_alert_cooldown_sec: 300.0
 
-classifier:
-  onnx_path: "models/classifier.onnx"
-  hef_path: "models/classifier.hef"
-  input_size: 224
-  classes:
-    - deer
-    - gaur
-    - leopard
-    - elephant
-    - sloth_bear
-    - tiger
-    - wild_boar
-  # Below this confidence (after combining crops per voting_strategy),
-  # stage2_verifier reports "unknown_animal" with the snapshot instead
-  # of a (possibly wrong) species name.
+# Stage 2: the species decision for a confirmed track, voted from the
+# detector's own per-frame (class, score) results for that track
+# (pipeline/stage2_verifier.py). No model runs here.
+stage2:
+  # Below this voted detector confidence, stage2_verifier reports
+  # "unknown_animal" with the snapshot instead of a (possibly wrong)
+  # species name. The detector itself keeps boxes from 0.45 up.
   min_confidence: 0.55
-  # Classify at most this many of the best crops per track before
-  # combining them into one final species (pipeline/stage2_verifier.py).
-  max_crops_per_track: 5
-  # How the per-crop classifications are combined into one species:
-  #   average  - average the softmax vectors, argmax the average (default)
-  #   majority - each crop votes for its own argmax class; most votes wins,
-  #              ties broken by summed confidence
+  # Vote over at most this many of the track's most recent frames.
+  max_frames_per_track: 10
+  # How the per-frame detector results are combined into one species:
+  #   average  - each species' summed score / number of frames; highest
+  #              wins (a frame voting for another species counts as 0)
+  #   majority - each frame votes for its species; most votes wins,
+  #              ties broken by summed score
   voting_strategy: "average"
 
 # SAHI (Slicing Aided Hyper Inference) — improves recall on small/far

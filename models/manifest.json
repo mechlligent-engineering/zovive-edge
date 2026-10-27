@@ -1,20 +1,12 @@
 {
   "model_version": "v0.1.0-unreleased",
   "detector": {
-    "onnx_path": "models/detector.onnx",
-    "hef_path": "models/detector.hef",
-    "sha256_onnx": null,
+    "onnx_path": "detector.onnx",
+    "hef_path": "detector.hef",
+    "sha256_onnx": "404de6092c00be3eb915b43b3029db4c2c5773d7e7e577c14a0d667d2fbd8652",
     "sha256_hef": null,
     "classes": ["deer", "gaur", "leopard", "elephant", "sloth_bear", "tiger", "wild_boar"],
-    "trained_from": "zovive-ml/dataset_generic",
-    "notes": "Fill in sha256 + trained_from commit once detector.onnx/.hef are exported from zovive-ml. ota/checksum_verify.py (batch 2) will verify against these hashes before activating a new model on the Pi."
-  },
-  "classifier": {
-    "onnx_path": "models/classifier.onnx",
-    "hef_path": "models/classifier.hef",
-    "sha256_onnx": null,
-    "sha256_hef": null,
-    "classes": ["deer", "gaur", "leopard", "elephant", "sloth_bear", "tiger", "wild_boar"],
-    "trained_from": "zovive-ml/dataset_species"
+    "trained_from": "ZOVIVE_FINAL_150E (D:/runs/detect/ZOVIVE_FINAL_150E/weights/best.pt, YOLO11m, data D:/FINAL_7_CLASS_DATASET)",
+    "notes": "The node's only model (single-stage: species come from the detector's classes). Fill in sha256_hef once detector.hef is compiled in zovive-ml. ota/checksum_verify.py (batch 2) will verify against these hashes before activating a new model on the Pi."
   }
 }

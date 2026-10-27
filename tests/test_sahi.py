@@ -10,7 +10,7 @@ import unittest
 import cv2
 import numpy as np
 
-from inference.base import ClassificationResult, Classifier, Detection, Detector
+from inference.base import Detection, Detector
 from inference.sahi_slicer import SahiConfig, SahiDetector, compute_tiles, is_sahi_enabled
 from tests.helpers import blank_frame
 
