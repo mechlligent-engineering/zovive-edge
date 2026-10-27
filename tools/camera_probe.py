@@ -9,6 +9,11 @@ never changes encoder, imaging or network settings. The lens moves only
 with --lens-test (zoom fully in and back out, then autofocus), which
 measures lens travel and settle times.
 
+RTSP is measured on the two configured streams only (sub_stream, main_stream:
+the URLs the edge service reads). Every ONVIF profile is still discovered and
+reported with its stream URI, but those URIs are never opened (see
+stream_identity()).
+
 Run on the Pi from /opt/zovive with the node's .env loaded, and stop
 zovive-detect.service first so the RTSP numbers aren't shared with it:
 
@@ -35,7 +40,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlsplit
 
 import cv2
 import numpy as np
@@ -122,37 +127,45 @@ def measure_stream(
         cap.release()
 
 
-def with_credentials(uri: str, username: str, password: str) -> str:
-    """Add user:pass to an ONVIF stream URI (they come back without them)."""
-    parts = urlsplit(uri)
-    if parts.username:
-        return uri
-    host = parts.hostname or ""
-    if ":" in host:  # IPv6 literal
-        host = f"[{host}]"
-    netloc = f"{quote(username, safe='')}:{quote(password, safe='')}@{host}"
-    if parts.port is not None:
-        netloc += f":{parts.port}"
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+# Query parameters the CP Plus firmware appends to every ONVIF GetStreamUri
+# answer (".../video/live?channel=1&subtype=1&unicast=true&proto=Onvif"). They
+# set up the RTSP session, not which stream is sent. With proto=Onvif the
+# camera answers 401 to the credentials the configured URLs open with
+# (verified on the bench), so the probe never opens ONVIF URIs.
+_ONVIF_SESSION_PARAMS = frozenset({("unicast", "true"), ("proto", "onvif")})
+
+StreamIdentity = tuple[str, tuple[tuple[str, str], ...]]
 
 
-def _path_and_query(uri: str) -> str:
-    parts = urlsplit(uri)
-    return f"{parts.path}?{parts.query}".lower()
+def stream_identity(uri: str) -> StreamIdentity | None:
+    """What selects the stream in `uri`: its path and query parameters
+    (case-insensitive, in any order), minus the ONVIF session parameters
+    above. Every other parameter still counts, including unicast or proto
+    with another value. Host, port and credentials are ignored. None if
+    `uri` can't be parsed."""
+    try:
+        parts = urlsplit(uri)
+    except ValueError:
+        return None
+    params = ((k.lower(), v.lower()) for k, v in parse_qsl(parts.query, keep_blank_values=True))
+    return parts.path.lower(), tuple(sorted(p for p in params if p not in _ONVIF_SESSION_PARAMS))
 
 
-def collect_onvif(camera: Any) -> tuple[dict, dict[str, str]]:
-    """ONVIF inventory for the report, plus {profile_token: raw stream URI}
-    (unredacted, kept out of the report) for the RTSP checks."""
-    stream_uris: dict[str, str] = {}
+def collect_onvif(camera: Any, configured: dict[str, StreamIdentity | None]) -> dict:
+    """ONVIF inventory for the report. Every profile is listed with its stream
+    URI as the camera sent it (credentials masked) and `configured_stream`:
+    the key in `configured` ({stream key: stream_identity of its URL}) whose
+    stream the profile carries, or None for one the Pi doesn't use."""
     profiles = camera.describe_media_profiles()
     for profile in profiles:
         token = profile.get("token")
         uri = camera.get_stream_uri(token)
         snapshot_uri = camera.get_snapshot_uri(token)
-        if uri:
-            stream_uris[token] = uri
+        identity = stream_identity(uri) if uri else None
         profile["stream_uri"] = redact_url(uri) if uri else None
+        profile["configured_stream"] = next(
+            (key for key, ident in configured.items() if identity is not None and ident == identity), None
+        )
         profile["snapshot_uri"] = redact_url(snapshot_uri) if snapshot_uri else None
     inventory = {
         "device": camera.get_device_info(),
@@ -164,7 +177,7 @@ def collect_onvif(camera: Any) -> tuple[dict, dict[str, str]]:
         "imaging": camera.get_imaging_options(),
         "event_topics": camera.get_event_topics(),
     }
-    return inventory, stream_uris
+    return inventory
 
 
 def largest_profile_token(profiles: list[dict]) -> str | None:
@@ -347,10 +360,12 @@ def phase0_checklist(report: dict) -> dict:
         "main_stream_codec": streams.get("main_stream", {}).get("codec"),
         "onvif_ok": report.get("onvif") is not None,
         "onvif_profile_count": len(onvif.get("profiles") or []),
-        "extra_streams_working": sorted(
-            k
-            for k, v in streams.items()
-            if k not in CONFIGURED_STREAMS and v.get("first_frame_sec") is not None
+        # Discovered over ONVIF only, never opened: a third stream for the
+        # base station's live view (D1), not one the Pi processes.
+        "extra_onvif_profiles": sorted(
+            str(p.get("token"))
+            for p in onvif.get("profiles") or []
+            if p.get("stream_uri") and p.get("configured_stream") is None
         ),
         "snapshot_ok": bool(good_snaps),
         "snapshot_resolution": (
@@ -377,29 +392,21 @@ def run_probe(
     cam_cfg = rtsp_cfg["camera"]
     user, password, host = cam_cfg["username"], cam_cfg["password"], cam_cfg["host"]
     report: dict[str, Any] = {"probe_version": 1, "ts": time.time(), "host": host}
+    urls = {key: build_rtsp_url(cam_cfg[key]["url"], host, user, password) for key in CONFIGURED_STREAMS}
 
     camera = None
-    stream_uris: dict[str, str] = {}
     if not skip_onvif:
         try:
             camera = camera_factory(rtsp_cfg)
-            report["onvif"], stream_uris = collect_onvif(camera)
+            report["onvif"] = collect_onvif(camera, {key: stream_identity(url) for key, url in urls.items()})
         except Exception as exc:  # report it; the RTSP checks still run
             camera = None
             report["onvif"] = None
             report["onvif_error"] = f"{type(exc).__name__}: {exc}"
 
-    streams: dict[str, dict] = {}
-    configured = set()
-    for key in CONFIGURED_STREAMS:
-        url = build_rtsp_url(cam_cfg[key]["url"], host, user, password)
-        configured.add(_path_and_query(url))
-        streams[key] = stream_measurer(url, rtsp_seconds)
-    # ONVIF profiles not covered by the configured URLs, e.g. a third stream
-    # that could serve the live view.
-    for token, uri in stream_uris.items():
-        if _path_and_query(uri) not in configured:
-            streams[f"onvif:{token}"] = stream_measurer(with_credentials(uri, user, password), rtsp_seconds)
+    # Each configured stream once; ONVIF URIs only repeat these or point at
+    # streams the Pi never processes.
+    streams = {key: stream_measurer(url, rtsp_seconds) for key, url in urls.items()}
     report["streams"] = streams
 
     if camera is not None and snapshot_count > 0:

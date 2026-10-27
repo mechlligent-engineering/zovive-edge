@@ -17,11 +17,15 @@ from tools.camera_probe import (
     measure_stream,
     phase0_checklist,
     run_probe,
-    with_credentials,
+    stream_identity,
 )
 
 PASSWORD = TEST_CAMERA_ENV["ZOVIVE_CAMERA_PASSWORD"]
 SETTLE_KEYS = {"settled", "settle_sec", "final_position", "move_status_reported", "saw_moving"}
+# What the CP-UNC-TE41ZL6C answered to GetStreamUri on the bench, and the
+# configured sub-stream URL it carries (that one opens, this one gets 401).
+FIRMWARE_SUB_URI = "rtsp://192.168.1.250:554/video/live?channel=1&subtype=1&unicast=true&proto=Onvif"
+CONFIGURED_SUB_URL = f"rtsp://admin:{PASSWORD}@192.168.1.250:554/video/live?channel=1&subtype=1"
 
 
 def _profile(token, width=None, height=None):
@@ -88,9 +92,10 @@ class FakeProbeCamera:
         ]
 
     def get_stream_uri(self, token):
-        return {"P0": "rtsp://10.0.0.5:554/live?subtype=0", "P1": "rtsp://10.0.0.5:554/live?subtype=1"}.get(
-            token, "rtsp://10.0.0.5:554/live?subtype=2"
-        )
+        # As the CP Plus firmware answers: no credentials, plus its own
+        # unicast/proto session parameters.
+        subtype = {"P0": "0", "P1": "1"}.get(token, "2")
+        return f"rtsp://10.0.0.5:554/live?subtype={subtype}&unicast=true&proto=Onvif"
 
     def get_snapshot_uri(self, token):
         return f"http://admin:{PASSWORD}@10.0.0.5/snap/{token}"
@@ -196,12 +201,38 @@ class TestMeasureStream(unittest.TestCase):
         self.assertEqual(result["frames"], 4)  # 5 good reads, the first one timed separately
 
 
-class TestHelpers(unittest.TestCase):
-    def test_with_credentials_quotes_special_characters(self):
-        url = with_credentials("rtsp://10.0.0.5:554/live?subtype=2", "admin", "p@ss:word")
-        self.assertEqual(url, "rtsp://admin:p%40ss%3Aword@10.0.0.5:554/live?subtype=2")
-        self.assertEqual(with_credentials("rtsp://u:p@h/x", "a", "b"), "rtsp://u:p@h/x")
+class TestStreamIdentity(unittest.TestCase):
+    """Regression: the firmware appends unicast=true&proto=Onvif to every ONVIF
+    stream URI, and proto=Onvif gets 401 with the configured credentials. The
+    probe used to open those URIs, failing all four."""
 
+    def test_firmware_session_params_do_not_change_the_stream(self):
+        sub = stream_identity(CONFIGURED_SUB_URL)
+        self.assertEqual(stream_identity(FIRMWARE_SUB_URI), sub)
+        self.assertEqual(stream_identity(CONFIGURED_SUB_URL + "&unicast=true"), sub)
+        self.assertEqual(
+            stream_identity("rtsp://h/video/live?PROTO=ONVIF&subtype=1&Unicast=TRUE&channel=1"), sub
+        )
+
+    def test_every_other_param_still_selects_the_stream(self):
+        sub = stream_identity(CONFIGURED_SUB_URL)
+        for uri in (
+            FIRMWARE_SUB_URI.replace("subtype=1", "subtype=0"),
+            FIRMWARE_SUB_URI.replace("subtype=1", "subtype=extra3"),
+            FIRMWARE_SUB_URI.replace("channel=1", "channel=2"),
+            FIRMWARE_SUB_URI.replace("/video/live", "/cam/realmonitor"),
+            CONFIGURED_SUB_URL + "&proto=RTP",  # only proto=Onvif is ignored
+            CONFIGURED_SUB_URL + "&unicast=false",
+            CONFIGURED_SUB_URL + "&audio=1",  # an unrelated parameter is kept
+        ):
+            with self.subTest(uri=uri):
+                self.assertNotEqual(stream_identity(uri), sub)
+
+    def test_unparseable_uri_is_none(self):
+        self.assertIsNone(stream_identity("rtsp://[::1/video/live"))
+
+
+class TestHelpers(unittest.TestCase):
     def test_largest_profile(self):
         self.assertEqual(largest_profile_token(FakeProbeCamera().describe_media_profiles()), "P0")
         self.assertEqual(largest_profile_token([_profile("only")]), "only")
@@ -324,14 +355,30 @@ class TestRunProbe(unittest.TestCase):
             camera_factory=lambda cfg: FakeProbeCamera(),
             stream_measurer=measure,
         )
-        # Configured sub + main, plus the ONVIF-only third profile.
-        self.assertEqual(set(report["streams"]), {"sub_stream", "main_stream", "onvif:P2"})
-        self.assertIn(f"admin:{PASSWORD}@", seen[-1])  # credentials injected for the extra stream...
-        self.assertNotIn(PASSWORD, str(report["onvif"]["profiles"]))  # ...but never in the report
+        # Only the two configured streams, each opened once with its configured
+        # URL; no ONVIF URI is ever opened.
+        self.assertEqual(list(report["streams"]), ["sub_stream", "main_stream"])
+        self.assertEqual(
+            seen,
+            [f"rtsp://admin:{PASSWORD}@10.0.0.5:554/live?subtype={s}" for s in ("1", "0")],
+        )
+        # Every ONVIF profile is still discovered and reported, mapped to the
+        # configured stream it carries, with its URI as the camera sent it.
+        profiles = {p["token"]: p for p in report["onvif"]["profiles"]}
+        self.assertEqual(
+            {token: p["configured_stream"] for token, p in profiles.items()},
+            {"P0": "main_stream", "P1": "sub_stream", "P2": None},
+        )
+        self.assertEqual(
+            profiles["P1"]["stream_uri"], "rtsp://10.0.0.5:554/live?subtype=1&unicast=true&proto=Onvif"
+        )
+        self.assertNotIn(PASSWORD, str(report))
+        self.assertEqual(report["snapshots"]["profile_token"], "P0")  # the highest-resolution profile
         checklist = report["checklist"]
         self.assertTrue(checklist["sub_stream_ok"] and checklist["main_stream_ok"])
         self.assertEqual(checklist["main_stream_codec"], "hevc")
-        self.assertEqual(checklist["extra_streams_working"], ["onvif:P2"])
+        self.assertEqual(checklist["onvif_profile_count"], 3)
+        self.assertEqual(checklist["extra_onvif_profiles"], ["P2"])
         self.assertEqual(checklist["snapshot_resolution"], "2688x1520")
         self.assertEqual(
             checklist["motion_event_topics"],
@@ -351,6 +398,51 @@ class TestRunProbe(unittest.TestCase):
         self.assertIn("onvif_error", report)
         self.assertEqual(set(report["streams"]), {"sub_stream", "main_stream"})
         self.assertFalse(report["checklist"]["onvif_ok"])
+
+    def test_firmware_uri_with_credentials_is_masked_and_still_matched(self):
+        class CredentialUris(FakeProbeCamera):
+            def get_stream_uri(self, token):
+                return f"rtsp://admin:{PASSWORD}@10.0.0.5:554/live?subtype=1&unicast=true&proto=Onvif"
+
+        measure, _ = self._measurer()
+        report = run_probe(
+            _rtsp_cfg(), 1.0, 0, False, camera_factory=lambda cfg: CredentialUris(), stream_measurer=measure
+        )
+        profile = report["onvif"]["profiles"][0]
+        self.assertEqual(
+            profile["stream_uri"], "rtsp://***@10.0.0.5:554/live?subtype=1&unicast=true&proto=Onvif"
+        )
+        self.assertEqual(profile["configured_stream"], "sub_stream")
+        self.assertNotIn(PASSWORD, str(report))
+
+    def test_bad_onvif_uris_never_stop_the_rtsp_checks(self):
+        class BadUris(FakeProbeCamera):
+            def get_stream_uri(self, token):
+                return {"P0": "rtsp://[::1/live?subtype=0", "P1": None}.get(token, "not a uri")
+
+        measure, seen = self._measurer()
+        report = run_probe(
+            _rtsp_cfg(), 1.0, 0, False, camera_factory=lambda cfg: BadUris(), stream_measurer=measure
+        )
+        self.assertEqual(len(seen), 2)
+        self.assertTrue(report["checklist"]["sub_stream_ok"] and report["checklist"]["main_stream_ok"])
+        profiles = {p["token"]: p for p in report["onvif"]["profiles"]}
+        self.assertEqual(profiles["P0"]["stream_uri"], "<unparseable url>")
+        self.assertIsNone(profiles["P1"]["stream_uri"])
+        self.assertEqual({p["configured_stream"] for p in profiles.values()}, {None})
+
+    def test_get_stream_uri_raising_still_runs_rtsp_checks(self):
+        class Raising(FakeProbeCamera):
+            def get_stream_uri(self, token):
+                raise RuntimeError("GetStreamUri fault")
+
+        measure, seen = self._measurer()
+        report = run_probe(
+            _rtsp_cfg(), 1.0, 2, False, camera_factory=lambda cfg: Raising(), stream_measurer=measure
+        )
+        self.assertIn("GetStreamUri fault", report["onvif_error"])
+        self.assertEqual(len(seen), 2)
+        self.assertTrue(report["checklist"]["sub_stream_ok"] and report["checklist"]["main_stream_ok"])
 
     def test_lens_test_only_when_asked(self):
         measure, _ = self._measurer()

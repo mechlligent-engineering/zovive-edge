@@ -119,7 +119,7 @@ Add `--image /path/to/animal.jpg` to the benchmark for realistic NMS/decode cost
 | Result (JSON key) | Decides |
 |---|---|
 | `camera_probe` `checklist.sub_stream_ok`, `mismatches` | Whether the camera's sub-stream must be set to 720p @ 10 fps in its web UI |
-| `checklist.extra_streams_working` | Live view on a separate third stream (preferred) vs. sharing the sub-stream (D1) |
+| `checklist.extra_onvif_profiles` (`onvif.profiles[].configured_stream`) | Live view on a separate third stream (preferred) vs. sharing the sub-stream (D1). Discovered over ONVIF only: the probe opens just `sub_stream` and `main_stream`, because the camera's ONVIF URIs carry `proto=Onvif` and answer 401 to the configured credentials |
 | `checklist.main_stream_codec` | H.264 vs H.265 for the 4MP archive (H.265 ≈ 40 % less storage) |
 | `checklist.snapshot_ok`, `snapshot_resolution`, `snapshot_latency_sec` | Whether the Phase 4 snapshot burst can use ONVIF snapshots at 4MP, and how many fit in the first seconds |
 | `checklist.move_status_reported`, `focus_status_reported`, `lens_test.*.settle_sec` | Phase 3 zoom/focus settle logic (status-driven vs. timers) |
