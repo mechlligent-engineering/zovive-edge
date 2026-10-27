@@ -167,9 +167,10 @@ class TestEdgeHealth(unittest.TestCase):
         self.status.inference_ok(detection_count=1)
         self.status.pipeline_tick(active_tracks=2, zoom_state="WIDE")
 
-    def _eval(self, advance: float = 0.0):
+    def _eval(self, advance: float = 0.0, stream: dict | None = None):
         snap = self.status.snapshot(
-            stream={"is_stalled": False}, queues={"detection_queue": {"current_size": 1}}
+            stream=stream if stream is not None else {"is_stalled": False},
+            queues={"detection_queue": {"current_size": 1}},
         )
         self.clock.now += advance
         return evaluate_edge_health(snap, self.clock.now, stale_after_sec=30)
@@ -206,6 +207,27 @@ class TestEdgeHealth(unittest.TestCase):
         edge = self._eval()
         self.assertEqual(edge["inference_status"], "idle")
         self.assertEqual(edge["camera_stream_status"], "stalled")
+
+    def test_capture_stall_flag_marks_stream_stalled_despite_recent_frame(self):
+        # The capture thread's 5 s stall verdict wins even while the inference
+        # loop's last frame is still inside stale_after_sec.
+        edge = self._eval(stream={"is_stalled": True, "reconnect_count": 2})
+        self.assertEqual(edge["camera_stream_status"], "stalled")
+        self.assertEqual(edge["stream_reconnect_count"], 2)
+
+    def test_stream_recovers_to_ok_when_frames_resume(self):
+        self.clock.now += 60
+        self.status.inference_loop_tick()
+        self.status.pipeline_tick()
+        self.assertEqual(self._eval()["camera_stream_status"], "stalled")
+        self.status.frame_received()
+        self.assertEqual(self._eval()["camera_stream_status"], "ok")
+
+    def test_no_frame_yet_is_no_frames(self):
+        status = EdgeStatus("cam01", clock=self.clock)
+        status.inference_loop_tick()
+        edge = evaluate_edge_health(status.snapshot(stream={"is_stalled": False}), self.clock.now)
+        self.assertEqual(edge["camera_stream_status"], "no_frames")
 
     def test_latest_inference_failed_is_error(self):
         self.clock.now += 1

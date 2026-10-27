@@ -5,7 +5,7 @@ because H.264 frames can't be skipped without decoding them)."""
 import unittest
 from unittest.mock import MagicMock, patch
 
-from capture import rtsp_reader
+from capture import reconnect, rtsp_reader
 from capture.rtsp_reader import RtspReader, build_rtsp_url, open_rtsp_capture
 from queues.frame_queue import LatestFrameSlot
 from tests.helpers import blank_frame, camera_credentials
@@ -39,6 +39,60 @@ class TestNoThrottle(unittest.TestCase):
         sleep.assert_not_called()
         self.assertEqual(reader.frame_slot.last_seq, frames_to_send)
         cap.release.assert_called_once()
+
+
+def _capture(frames: int, stop=None) -> MagicMock:
+    """A capture that delivers `frames` frames (setting `stop` on the last
+    one, if given) and then drops: every later read fails."""
+    cap = MagicMock()
+    sent = {"n": 0}
+
+    def read():
+        sent["n"] += 1
+        if sent["n"] > frames:
+            return False, None
+        if stop is not None and sent["n"] == frames:
+            stop.set()
+        return True, blank_frame()
+
+    cap.read.side_effect = read
+    return cap
+
+
+class TestReconnectCounting(unittest.TestCase):
+    """The heartbeat's stream_reconnect_count comes from StreamHealth, so every
+    reconnect after a dropped stream must be counted, and only those."""
+
+    def _run(self, reader: RtspReader, opens: list) -> tuple[dict, MagicMock]:
+        with (
+            patch.object(reader, "_open_capture", side_effect=opens),
+            patch.object(reconnect.time, "sleep") as backoff_sleep,
+        ):
+            reader.run()
+        return reader.health.snapshot(), backoff_sleep
+
+    def test_first_connect_is_not_a_reconnect(self):
+        reader = _reader()
+        snap, backoff = self._run(reader, [_capture(3, reader._stop_event)])
+        self.assertEqual((snap["frames_received"], snap["stalled_count"], snap["reconnect_count"]), (3, 0, 0))
+        backoff.assert_not_called()
+
+    def test_drop_then_immediate_reopen_counts_one_reconnect(self):
+        # Regression: a reopen that worked on its first attempt went uncounted,
+        # so a flapping camera showed stalls but never a reconnect.
+        reader = _reader()
+        first = _capture(2)
+        snap, backoff = self._run(reader, [first, _capture(3, reader._stop_event)])
+        self.assertEqual((snap["frames_received"], snap["stalled_count"], snap["reconnect_count"]), (5, 1, 1))
+        first.release.assert_called_once()
+        backoff.assert_not_called()
+
+    def test_drop_then_failed_attempts_counts_one_reconnect_after_backoff(self):
+        reader = _reader()
+        snap, backoff = self._run(reader, [_capture(2), None, None, _capture(1, reader._stop_event)])
+        self.assertEqual((snap["frames_received"], snap["stalled_count"], snap["reconnect_count"]), (3, 1, 1))
+        self.assertEqual(backoff.call_count, 2)
+        self.assertFalse(snap["is_stalled"])
 
 
 class TestOpenCapture(unittest.TestCase):

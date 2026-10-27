@@ -35,6 +35,10 @@ from utils.config_loader import load
 
 log = logging.getLogger(__name__)
 
+# Longer than reconnect.stall_timeout_sec (5 s) in rtsp_config.yaml, and they
+# do different jobs: StreamHealth.is_stalled() reports a silent camera to the
+# heartbeat while this read is still waiting; at this timeout the read fails
+# and the reader reconnects.
 _FFMPEG_TIMEOUT_MSEC = 10_000
 
 
@@ -114,6 +118,9 @@ class RtspReader:
                 cap_holder[0].release()
 
     def _loop(self, cap_holder: list) -> None:
+        # Set by a failed read: the next successful open is a reconnect even
+        # when its first attempt succeeds (no backoff attempt was counted).
+        lost_stream = False
         while not self._stop_event.is_set():
             self.loop_ts = time.time()
             cap = cap_holder[0]
@@ -127,8 +134,9 @@ class RtspReader:
                     )
                     continue
                 else:
-                    if self._reconnect_policy.attempt_count > 0:
+                    if lost_stream or self._reconnect_policy.attempt_count > 0:
                         self.health.record_reconnect()
+                    lost_stream = False
                     self._reconnect_policy.reset()
                     log.info("rtsp connected", extra={"camera_id": self.camera_id})
 
@@ -139,6 +147,7 @@ class RtspReader:
                 cap.release()
                 cap_holder[0] = None
                 self.health.record_stall()
+                lost_stream = True
                 continue
 
             self.health.record_frame()

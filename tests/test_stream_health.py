@@ -128,6 +128,20 @@ class TestSnapshotValues(_HealthTestCase):
         self.assertTrue(self.snapshot(self.health)["is_stalled"])
         self.assertTrue(self.health.is_stalled())
 
+    def test_recovers_when_frames_resume(self):
+        self._frames(3, 0.1)
+        self.clock.t += 5.5
+        self.assertTrue(self.snapshot(self.health)["is_stalled"])
+        self._frames(1, 0.04)
+        snap = self.snapshot(self.health)
+        self.assertFalse(snap["is_stalled"])
+        self.assertEqual(snap["frames_received"], 4)
+
+    def test_fps_counts_only_the_last_30_intervals(self):
+        self._frames(31, 1.0)  # 30 intervals at 1 fps...
+        self._frames(30, 0.04)  # ...pushed out by 30 at 25 fps
+        self.assertEqual(self.snapshot(self.health)["fps"], 25.0)
+
     def test_fresh_stream_not_stalled_until_timeout(self):
         self.assertFalse(self.snapshot(self.health)["is_stalled"])
         self.clock.t += 5.5

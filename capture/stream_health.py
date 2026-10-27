@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 
@@ -30,15 +31,15 @@ class StreamHealth:
         # Reentrant: snapshot() holds it while calling fps()/is_stalled().
         self._lock = threading.RLock()
         self._c = _Counters()
-        self._fps_window: list[float] = []
+        # The last 30 frame intervals; record_frame() runs per frame, and a
+        # bounded deque drops the oldest in O(1).
+        self._fps_window: deque[float] = deque(maxlen=30)
 
     def record_frame(self) -> None:
         now = time.time()
         with self._lock:
             if self._c.last_frame_ts is not None:
                 self._fps_window.append(now - self._c.last_frame_ts)
-                if len(self._fps_window) > 30:
-                    self._fps_window.pop(0)
             self._c.frames_received += 1
             self._c.last_frame_ts = now
 
