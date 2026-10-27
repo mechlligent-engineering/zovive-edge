@@ -19,10 +19,11 @@ capture thread (RtspReader | FileFrameSource)
                         (NEW -> CONFIRMING -> CONFIRMED, gated by
                          pipeline/stage1_gate's 3-of-5 presence vote
                          + per-track cooldown)
-                     -> on CONFIRMED: pipeline/stage2_verifier classifies
-                        the best few crops (pipeline/best_snapshot) and
-                        combines them via classifier.voting_strategy
-                        ("average" softmax-blend or "majority" vote)
+                     -> on CONFIRMED: pipeline/stage2_verifier votes the
+                        species from the track's per-frame detector
+                        (class, score) results via stage2.voting_strategy
+                        ("average" or "majority"); no second model runs.
+                        pipeline/best_snapshot picks the alert snapshot
                      -> pipeline/alert_dispatcher: db/outbox row first
                         (durable), then storage/evidence_store snapshot,
                         then queues/alert_queue for the sender
@@ -52,14 +53,15 @@ others:
 
 ## Backend swap (ONNX <-> Hailo)
 
-`inference/base.py` defines `Detector`/`Classifier` as the only
-contract the pipeline depends on. `configs/node_config.yaml`'s
-`runtime.backend` picks `inference/onnx_inference.py` (laptop, CI, or
-the Pi's CPU) or `inference/hailo_inference.py` (Pi + Hailo-8) in
-`edge_main.build_detector_and_classifier()` — nothing else in the
-codebase branches on backend. If `backend: hailo` is set but
-`HailoDetector`/`HailoClassifier` fail to construct (HailoRT missing,
-no device, a bad `.hef`), `build_detector_and_classifier()` catches
+`inference/base.py` defines `Detector` as the only contract the
+pipeline depends on (single-stage: the 7-species detector is the
+node's only model). `configs/node_config.yaml`'s `runtime.backend`
+picks `inference/onnx_inference.py` (laptop, CI, or the Pi's CPU) or
+`inference/hailo_inference.py` (Pi + Hailo-8) in
+`edge_main.build_detector()` — nothing else in the codebase branches
+on backend. If `backend: hailo` is set but `HailoDetector` fails to
+construct (a missing `.hef`, HailoRT missing, no device, a bad
+`.hef`), `build_detector()` catches `FileNotFoundError` /
 `InferenceBackendError` and falls back to the ONNX backend on the
 Pi's CPU with a logged warning, rather than crash-looping the whole
 process under systemd.
@@ -126,9 +128,9 @@ directly. What the software adds on top:
 1. A track needs 3 of the last 5 frames as "animal present"
    (`pipeline/stage1_gate.py`) before anything happens — a single-frame
    false positive is just noise, not an alert.
-2. Classification averages softmax scores over up to 5 of the
-   sharpest crops (`pipeline/stage2_verifier.py`), not one frame.
-3. Below `classifier.min_confidence`, the event is reported as
+2. The species is voted over up to 10 of the track's recent detector
+   results (`pipeline/stage2_verifier.py`), not taken from one frame.
+3. Below `stage2.min_confidence`, the event is reported as
    `unknown_animal` with the snapshot rather than a guessed species.
 
 None of this fixes a genuinely bad model — it only stops a good-but-imperfect
