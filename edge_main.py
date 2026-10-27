@@ -60,7 +60,7 @@ from queues.alert_queue import AlertQueue
 from queues.detection_queue import DetectionBatch, DetectionQueue
 from queues.frame_queue import LatestFrameSlot
 from queues.queue_monitor import snapshot as queues_snapshot
-from utils.config_loader import ConfigError, load
+from utils.config_loader import ConfigError, camera_host_source, load
 from watchdog import sd_notify
 from watchdog.edge_status import EdgeStatus, write_status_file
 from watchdog.restart_history import record_exit, record_start
@@ -398,6 +398,12 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
 
     node_cfg = load(paths.NODE_CONFIG)
     rtsp_cfg = load(paths.RTSP_CONFIG)
+    # Address only (load() already validated it), never the credentials or URLs.
+    camera_host = rtsp_cfg["camera"]["host"]
+    log.info(
+        "camera host",
+        extra={"camera_host": camera_host, "camera_host_source": camera_host_source(camera_host)},
+    )
     inf_cfg = load(paths.INFERENCE_CONFIG)
     tracking_cfg = load(paths.TRACKING_CONFIG)
     zones_cfg = load(paths.DETECTION_ZONES_CONFIG)

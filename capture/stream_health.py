@@ -27,7 +27,8 @@ class StreamHealth:
     def __init__(self, camera_id: str, stall_timeout_sec: float = 5.0):
         self.camera_id = camera_id
         self.stall_timeout_sec = stall_timeout_sec
-        self._lock = threading.Lock()
+        # Reentrant: snapshot() holds it while calling fps()/is_stalled().
+        self._lock = threading.RLock()
         self._c = _Counters()
         self._fps_window: list[float] = []
 

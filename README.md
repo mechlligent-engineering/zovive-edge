@@ -22,9 +22,10 @@ python3 -m unittest discover -s tests -v      # 131 tests, no camera/model neede
 # Run the full pipeline against a local video file instead of a real camera.
 # (You'll still need models/detector.onnx and models/classifier.onnx —
 #  export those from zovive-ml first; see docs/ARCHITECTURE.md.)
-# Camera credentials are always required (edge_main.py exits with code 78
-# if either is unset or empty); any non-empty value works for --source file:.
+# Camera (RTSP and ONVIF) credentials are always required (edge_main.py exits
+# with code 78 if any is unset or empty); any non-empty value works for --source file:.
 export ZOVIVE_CAMERA_USERNAME=dev ZOVIVE_CAMERA_PASSWORD=dev
+export ZOVIVE_ONVIF_USERNAME=dev ZOVIVE_ONVIF_PASSWORD=dev
 python3 edge_main.py --source file:/path/to/some_video.mp4
 ```
 

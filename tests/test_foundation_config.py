@@ -361,8 +361,8 @@ class ExtensionTests(ConfigTestCase):
 
 
 class RedactUrlTests(unittest.TestCase):
-    def test_redacts_password_only(self):
-        self.assertEqual(redact_url("rtsp://admin:pw@10.0.0.1:554/s"), "rtsp://admin:***@10.0.0.1:554/s")
+    def test_redacts_username_and_password(self):
+        self.assertEqual(redact_url("rtsp://admin:pw@10.0.0.1:554/s"), "rtsp://***@10.0.0.1:554/s")
         self.assertEqual(redact_url("rtsp://10.0.0.1/s"), "rtsp://10.0.0.1/s")
 
 

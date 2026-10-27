@@ -20,7 +20,12 @@ from utils import config_loader
 
 # Fake camera credentials for tests that load configs/rtsp_config.yaml or
 # camera.yaml, which require ZOVIVE_CAMERA_USERNAME/PASSWORD. Not real secrets.
-TEST_CAMERA_ENV = {"ZOVIVE_CAMERA_USERNAME": "test-user", "ZOVIVE_CAMERA_PASSWORD": "test-pass"}  # nosec B105
+TEST_CAMERA_ENV = {
+    "ZOVIVE_CAMERA_USERNAME": "test-user",
+    "ZOVIVE_CAMERA_PASSWORD": "test-pass",
+    "ZOVIVE_ONVIF_USERNAME": "test-onvif-user",
+    "ZOVIVE_ONVIF_PASSWORD": "test-onvif-pass",
+}  # nosec B105
 
 
 @contextmanager
