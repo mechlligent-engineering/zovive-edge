@@ -8,10 +8,10 @@ clip:
   enabled: true
   pre_event_seconds: 8.0
   post_event_seconds: 8.0
-  # Should match (or be close to) the camera's sub-stream fps in
-  # rtsp_config.yaml (sub_stream.fps) / the FileFrameSource fps used,
-  # since that's the real rate frames arrive at the pipeline thread; it
-  # sizes the pre-event ring buffer and is the FPS written into the MP4
+  # Should match the rate frames actually reach the clip recorder: one per
+  # processed detection batch, i.e. the inference rate (measure it on the Pi:
+  # benchmark_edge soak `inference_fps`), not the camera's 25 fps sub-stream.
+  # It sizes the pre-event ring buffer and is the FPS written into the MP4
   # header (a mismatch makes clips play too fast or too slow).
   fps: 10.0
   # Downscale the clip's width before writing, keeping aspect ratio;

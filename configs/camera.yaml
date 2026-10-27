@@ -10,9 +10,9 @@ rtsp_url: "rtsp://${ZOVIVE_CAMERA_USERNAME}:${ZOVIVE_CAMERA_PASSWORD}@${ZOVIVE_C
 transport: tcp                 # tcp | udp  (tcp is more reliable over weak links)
 
 resolution:
-  width: 640
-  height: 360
-fps: 8
+  width: 704
+  height: 576
+fps: 25
 timeout_sec: 10                # no frame for this long => stream considered dead
 
 reconnect:
