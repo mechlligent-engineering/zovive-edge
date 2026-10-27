@@ -6,10 +6,13 @@ together, just without real capture/inference threads or a real
 camera/model.
 """
 
+import errno
+import os
 import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
@@ -30,7 +33,7 @@ from pipeline.track_state_machine import TrackStateMachine
 from pipeline.zone_filter import ZoneFilter
 from queues.alert_queue import AlertQueue
 from queues.detection_queue import DetectionBatch, DetectionQueue
-from storage.evidence_store import EvidenceStore
+from storage.evidence_store import EvidenceStore, SnapshotWriteError
 from tests.helpers import AlwaysClassifier, blank_frame
 
 
@@ -143,6 +146,37 @@ class TestPipelineIntegration(unittest.TestCase):
         )
 
         self.assertEqual(get_pending(limit=10), [])
+
+    def test_failed_snapshot_save_records_no_event_and_queues_nothing(self):
+        # The real dispatcher and store: the snapshot is saved before the
+        # outbox row, so a failed save leaves no row claiming evidence exists.
+        real_link = os.link
+
+        def another_writer_first(src, dst):
+            Path(dst).write_bytes(b"other writer")
+            return real_link(src, dst)
+
+        failures = {
+            "another writer took the final name": mock.patch("os.link", side_effect=another_writer_first),
+            "disk I/O error": mock.patch("os.fsync", side_effect=OSError(errno.EIO, "Input/output error")),
+        }
+        for n, (name, failure) in enumerate(failures.items()):
+            with self.subTest(name):
+                alert_queue = AlertQueue()
+                dispatcher = AlertDispatcher(
+                    alert_queue,
+                    evidence_store=EvidenceStore(snapshot_dir=paths.SNAPSHOT_DIR),
+                    node_config={"node": {"camera_id": "cam01"}},
+                    alert_policy={},
+                )
+                with failure, self.assertRaises(SnapshotWriteError) as cm:
+                    dispatcher.dispatch(f"track-{n}", "tiger", 0.92, blank_frame())
+                self.assertIsInstance(cm.exception, OSError, "what the pipeline supervisor restarts on")
+                self.assertEqual(get_connection().execute("SELECT COUNT(*) FROM events").fetchone()[0], 0)
+                self.assertEqual(alert_queue.qsize(), 0)
+
+        # Only the other writer's file is left, unchanged; no temp files.
+        self.assertEqual([p.read_bytes() for p in paths.SNAPSHOT_DIR.iterdir()], [b"other writer"])
 
 
 if __name__ == "__main__":
