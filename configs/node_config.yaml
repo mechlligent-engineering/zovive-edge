@@ -1,13 +1,20 @@
 # Identity of this edge node. Every DB row, log line and alert carries
 # camera_id/node_id from here so multi-camera deployments stay attributable.
+# network/node_identity.py combines these with the MAC and CPU serial into
+# the identity the base station sees.
 node:
-  node_id: "zovive-node-01"
+  # Unique per Pi: set ZOVIVE_NODE_ID in /opt/zovive/.env so every SD card
+  # can share this file. The fallback is for development only.
+  node_id: "${ZOVIVE_NODE_ID:-zovive-node-01}"
   camera_id: "cam01"
   camera_name: "North Gate"
   forest_name: "Example Range"
   gps:
     lat: 0.0
     lon: 0.0
+  # Interface whose MAC identifies this node, e.g. "eth0". Empty: the first
+  # wired interface, else the first wireless one.
+  identity_interface: ""
 
 # Which detector backend to run. "onnx" runs on any CPU (laptop, CI);
 # "hailo" requires the Hailo-8 + HailoRT on the Pi. Selecting this here

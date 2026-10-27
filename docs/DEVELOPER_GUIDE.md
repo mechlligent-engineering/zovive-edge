@@ -301,6 +301,7 @@ forever. Both are avoidable with ordering.
 | `ack_listener.py` | FINAL_ACK is the only purge trigger | **[you]** |
 | `transfer_state.py` | artifact state machine in SQLite | **[you]** |
 | `transfer_protocol.md` | the contract with the base station | **[done]** |
+| `node_identity.py` | who this node is (node_id, camera_id, MAC, CPU serial, IP); built once, reused by registration and heartbeat | **[done]** |
 | `boot_registration.py`, `heartbeat.py`, `sync_daemon.py`, `alert_schema.py` | | **[you]** |
 
 ## The rest, briefly
