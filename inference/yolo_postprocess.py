@@ -1,4 +1,5 @@
-# Postprocessing pipeline for Hailo split-head YOLO11
+# Combined postprocessing for YOLO11: ONNX (single tensor) and Hailo (split-head)
+from __future__ import annotations
 from dataclasses import dataclass
 import cv2
 import numpy as np
@@ -57,13 +58,85 @@ def _nms_per_class(boxes, scores, class_ids, iou_thresh):
         c_boxes = boxes[c_idxs]
         c_scores = scores[c_idxs]
         
-        # cv2.dnn.NMSBoxes expects boxes as [x, y, w, h]
         rects = [[float(b[0]), float(b[1]), float(b[2] - b[0]), float(b[3] - b[1])] for b in c_boxes]
         idxs = cv2.dnn.NMSBoxes(rects, c_scores.tolist(), 0.0, iou_thresh)
         if len(idxs) > 0:
             keep_indices.extend(c_idxs[np.array(idxs).reshape(-1)])
     return keep_indices
 
+# --- Decoder for ONNX models (single flat output: [1, 4 + classes, 8400]) ---
+def decode_yolo_detections(
+    output: np.ndarray,
+    class_names: list[str],
+    ratio: float | tuple[float, float] = 1.0,
+    pad: tuple[float, float] = (0.0, 0.0),
+    orig_shape: tuple[int, int] | None = None,
+    conf_threshold: float = 0.45,
+    iou_threshold: float = 0.45,
+):
+    try:
+        from inference.base import Detection as OutDetection
+    except ImportError:
+        OutDetection = Detection
+
+    arr = np.squeeze(output)
+    if arr.ndim == 2 and arr.shape[0] < arr.shape[1]:
+        arr = arr.T  # Transpose to [8400, 4 + num_classes]
+
+    if arr.shape[0] == 0:
+        return []
+
+    boxes_cxcywh = arr[:, :4]
+    scores_all = arr[:, 4:]
+    
+    class_ids = np.argmax(scores_all, axis=-1)
+    max_scores = scores_all[np.arange(len(class_ids)), class_ids]
+    
+    mask = max_scores >= conf_threshold
+    if not np.any(mask):
+        return []
+
+    boxes_cxcywh = boxes_cxcywh[mask]
+    scores = max_scores[mask]
+    class_ids = class_ids[mask]
+
+    x1 = boxes_cxcywh[:, 0] - boxes_cxcywh[:, 2] / 2.0
+    y1 = boxes_cxcywh[:, 1] - boxes_cxcywh[:, 3] / 2.0
+    x2 = boxes_cxcywh[:, 0] + boxes_cxcywh[:, 2] / 2.0
+    y2 = boxes_cxcywh[:, 1] + boxes_cxcywh[:, 3] / 2.0
+    boxes = np.column_stack([x1, y1, x2, y2])
+
+    keep = _nms_per_class(boxes, scores, class_ids, iou_threshold)
+    if not keep:
+        return []
+
+    rx, ry = ratio[:2] if isinstance(ratio, (tuple, list)) else (float(ratio), float(ratio))
+    pad_x, pad_y = pad[:2] if isinstance(pad, (tuple, list)) else (0.0, 0.0)
+
+    detections = []
+    for i in keep:
+        bx1, by1, bx2, by2 = boxes[i]
+        fx1 = max(0.0, (bx1 - pad_x) / rx)
+        fy1 = max(0.0, (by1 - pad_y) / ry)
+        fx2 = (bx2 - pad_x) / rx
+        fy2 = (by2 - pad_y) / ry
+        if orig_shape is not None:
+            fx1 = min(fx1, float(orig_shape[1]))
+            fy1 = min(fy1, float(orig_shape[0]))
+            fx2 = min(fx2, float(orig_shape[1]))
+            fy2 = min(fy2, float(orig_shape[0]))
+
+        cid = int(class_ids[i])
+        cname = class_names[cid] if cid < len(class_names) else f"class_{cid}"
+        detections.append(OutDetection(
+            box=[fx1, fy1, fx2, fy2],
+            score=float(scores[i]),
+            class_id=cid,
+            class_name=cname
+        ))
+    return detections
+
+# --- Decoder for Hailo-8L models (split heads: 6 conv layers) ---
 def decode_split_heads(*args, **kwargs):
     outputs = args[0] if len(args) > 0 else kwargs.get("outputs")
     heads = args[1] if len(args) > 1 else kwargs.get("heads")
@@ -80,7 +153,6 @@ def decode_split_heads(*args, **kwargs):
     all_class_ids = []
     bins = np.arange(REG_MAX, dtype=np.float32)
     
-    # Safe sigmoid threshold: x >= ln(conf / (1 - conf))
     safe_conf = np.clip(conf_threshold, 1e-4, 1.0 - 1e-4)
     logit_th = float(np.log(safe_conf / (1.0 - safe_conf)))
     
@@ -105,7 +177,6 @@ def decode_split_heads(*args, **kwargs):
         selected_logits = cand_logits[np.arange(len(idx)), c_ids]
         cand_scores = 1.0 / (1.0 + np.exp(-np.clip(selected_logits, -30.0, 30.0)))
         
-        # Softmax over 16 bins for distribution focal loss
         dfl = box_flat[idx]
         dfl_exp = np.exp(dfl - dfl.max(axis=-1, keepdims=True))
         dist = (dfl_exp / dfl_exp.sum(axis=-1, keepdims=True)) @ bins * head.stride
