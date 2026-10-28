@@ -5,9 +5,9 @@ Sections (--sections, comma-separated):
 
   hef     Decision D13. For the detector .hef in configs/inference_config.yaml
           (the node's only model): its input/output vstreams, whether it was
-          compiled with on-chip NMS, and whether
-          inference/yolo_postprocess.decode_yolo_detections can read its
-          output as-is.
+          compiled with on-chip NMS, and whether HailoDetector can read its
+          outputs (the head split before the DFL decode:
+          inference/yolo_postprocess.split_head_layout).
   models  Latency of the detector at 720p and 4MP input, letterbox alone,
           and SAHI on a 4MP frame (every tile vs. one ROI around a distant
           animal). Built with edge_main.build_detector, so it measures exactly
@@ -62,6 +62,7 @@ from health_main import _pi_throttle_status
 from inference.base import Detection, Detector
 from inference.preprocess import letterbox
 from inference.sahi_slicer import SahiConfig, SahiDetector, compute_tiles
+from inference.yolo_postprocess import split_head_layout
 from pipeline.roi_cluster import cluster_box
 from queues.detection_queue import DetectionQueue
 from queues.frame_queue import LatestFrameSlot
@@ -120,15 +121,16 @@ def is_nms_format(format_order: Any) -> bool:
     return "NMS" in str(format_order).upper()
 
 
-def raw_yolo_compatible(output_shapes: list, num_classes: int) -> bool:
-    """decode_yolo_detections (and _HailoRunner, which reads only output [0])
-    expects exactly one output shaped (4+nc, N) or (N, 4+nc), ignoring
-    size-1 dimensions. A HEF that keeps the per-stride heads as separate
-    outputs fails this, as does one with on-chip NMS."""
-    if len(output_shapes) != 1:
-        return False
-    dims = [int(d) for d in output_shapes[0] if int(d) != 1]
-    return len(dims) == 2 and (4 + num_classes) in dims
+def split_heads_compatible(outputs: list[dict], num_classes: int, input_size: int) -> tuple[bool, str | None]:
+    """Whether HailoDetector can read these outputs: the detection head cut
+    before its DFL decode, three box + three class outputs
+    (inference/yolo_postprocess.split_head_layout, the same check HailoDetector
+    runs at load). Returns (ok, reason it is not)."""
+    try:
+        split_head_layout({o["name"]: o["shape"] for o in outputs}, num_classes, input_size)
+    except (TypeError, ValueError) as exc:  # TypeError: an NMS output has no plain shape
+        return False, str(exc)
+    return True, None
 
 
 def make_frame(width: int, height: int, image: np.ndarray | None = None) -> np.ndarray:
@@ -221,12 +223,13 @@ def inspect_hefs(hef_paths: dict[str, str], num_classes: dict[str, int], hpf: An
             entry["outputs"] = [_vstream_info(o) for o in hef.get_output_vstream_infos()]
             entry["on_chip_nms"] = any(is_nms_format(o["format_order"]) for o in entry["outputs"])
             if name == "detector":
-                shapes = [o["shape"] for o in entry["outputs"] if o["shape"] is not None]
-                entry["decode_yolo_detections_compatible"] = (
-                    not entry["on_chip_nms"]
-                    and len(shapes) == len(entry["outputs"])
-                    and raw_yolo_compatible(shapes, num_classes.get(name, 0))
+                input_shape = entry["inputs"][0]["shape"] if entry["inputs"] else None
+                ok, reason = split_heads_compatible(
+                    entry["outputs"], num_classes.get(name, 0), int(input_shape[0]) if input_shape else 640
                 )
+                entry["hailo_detector_compatible"] = ok and not entry["on_chip_nms"]
+                if reason:
+                    entry["incompatible_because"] = reason
         except Exception as exc:
             entry["error"] = f"{type(exc).__name__}: {exc}"
         report["models"][name] = entry

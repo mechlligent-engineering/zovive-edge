@@ -64,10 +64,24 @@ picks `inference/onnx_inference.py` (laptop, CI, or the Pi's CPU) or
 `edge_main.build_detector()` — nothing else in the codebase branches
 on backend. If `backend: hailo` is set but `HailoDetector` fails to
 construct (a missing `.hef`, HailoRT missing, no device, a bad
-`.hef`), `build_detector()` catches `FileNotFoundError` /
-`InferenceBackendError` and falls back to the ONNX backend on the
-Pi's CPU with a logged warning, rather than crash-looping the whole
-process under systemd.
+`.hef`, or outputs that are not the split head below), `build_detector()`
+catches `FileNotFoundError` / `InferenceBackendError` and falls back to
+the ONNX backend on the Pi's CPU with a logged warning, rather than
+crash-looping the whole process under systemd. `runtime.backend` is
+`hailo` in the repo, so a laptop takes that fallback too.
+
+The two backends get the same model in two forms. `detector.onnx` outputs
+the decoded head, (1, 11, 8400). `detector.hef` is cut before the head's
+DFL decode (zovive-ml `hailo_config/yolov11.alls`): it takes the 640x640
+letterboxed frame as uint8 RGB and divides by 255 on the device, and has
+six outputs — per stride 8/16/32 a box conv (64 channels) and a class
+conv (7 channels). `inference/yolo_postprocess.py` turns those into the
+same rows the ONNX head gives (`decode_split_heads`; outputs matched by
+shape, not layer name) and both go through the same confidence filter,
+NMS and letterbox reversal. zovive-ml's
+`scripts/eval_audit/verify_split_head_decoder.py` checks the decoder
+against the float model; `python -m tools.hef_parity --images ...`
+compares the compiled HEF with `detector.onnx` on the Pi.
 
 ## SAHI (tiled inference)
 

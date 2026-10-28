@@ -88,7 +88,8 @@ class ValidConfigTests(ConfigTestCase):
         self.assertEqual(cfg.node.node_id, "zovive-node-01")
         self.assertEqual(cfg.node.installation.installed_on, dt.date(2026, 9, 1))
         self.assertEqual((cfg.camera.resolution.width, cfg.camera.resolution.height), (704, 576))
-        self.assertEqual(cfg.inference.backend, InferenceBackend.ONNX)
+        self.assertEqual(cfg.inference.backend, InferenceBackend.HAILO)
+        self.assertEqual(cfg.inference.active_model_path.name, "detector.hef")
         self.assertEqual(len(cfg.inference.classes), 7)
         self.assertEqual(cfg.network.base_station_port, 8000)  # "8000" string coerced
         self.assertEqual(cfg.warnings, ())

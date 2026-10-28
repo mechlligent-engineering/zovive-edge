@@ -2,7 +2,7 @@
 # Relative paths are resolved against the project root.
 schema_version: 1
 
-backend: "${ZOVIVE_INFERENCE_BACKEND:-onnx}"   # onnx (CPU) | hailo (Pi 5 AI HAT)
+backend: "${ZOVIVE_INFERENCE_BACKEND:-hailo}"   # hailo (Pi 5 AI HAT) | onnx (CPU)
 model_path: models/detector.onnx
 input_size: 640
 

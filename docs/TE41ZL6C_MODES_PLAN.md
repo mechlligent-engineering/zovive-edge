@@ -124,7 +124,7 @@ Add `--image /path/to/animal.jpg` to the benchmark for realistic NMS/decode cost
 | `checklist.snapshot_ok`, `snapshot_resolution`, `snapshot_latency_sec` | Whether the Phase 4 snapshot burst can use ONVIF snapshots at 4MP, and how many fit in the first seconds |
 | `checklist.move_status_reported`, `focus_status_reported`, `lens_test.*.settle_sec` | Phase 3 zoom/focus settle logic (status-driven vs. timers) |
 | `checklist.motion_event_topics` | Phase 2 ONVIF topic subscription |
-| `bench.hef.models.detector.on_chip_nms`, `decode_yolo_detections_compatible` | **D13**: whether `inference/yolo_postprocess.py` / `_HailoRunner` must change for the YOLO11m HEF |
+| `bench.hef.models.detector.on_chip_nms`, `hailo_detector_compatible` | **D13**: whether `HailoDetector` can read the YOLO11m HEF (head split before the DFL decode, `inference/yolo_postprocess.split_head_layout`) |
 | `bench.hef.shared_vdevice.ok` | **D13**: whether detector + classifier fit on one Hailo-8 (fix for `_HailoRunner`'s one-VDevice-per-model) |
 | `bench.models.detector.720p`, `bench.sahi.roi` | Achievable TRIGGER fps; SAHI cost per snapshot |
 | `soak.inference_fps`, `process_cpu_cores`, `max_soc_temp_c`, `throttle_end` | Sustained load and thermal margin of the approved design |

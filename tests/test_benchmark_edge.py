@@ -23,8 +23,8 @@ from tools.benchmark_edge import (
     inspect_hefs,
     is_nms_format,
     latency_stats,
-    raw_yolo_compatible,
     soak,
+    split_heads_compatible,
 )
 from utils.thermal_monitor import read_soc_temp_c
 
@@ -52,7 +52,14 @@ def _fake_hpf(outputs_by_path, broken_paths=()):
     return NS(__version__="4.20.0", HEF=FakeHef)
 
 
-# Single-stage: the detector is the node's only model / HEF.
+# Single-stage: the detector is the node's only model / HEF, its head split
+# before the DFL decode (box conv 64 channels + class conv 7 per stride).
+SPLIT_HEADS = [
+    _info(f"yolov11/conv{n}", (g, g, c))
+    for g, pair in ((80, (71, 74)), (40, (87, 90)), (20, (102, 105)))
+    for n, c in zip(pair, (64, 7), strict=True)
+]
+SPLIT_DETECTOR = {"det.hef": SPLIT_HEADS}
 RAW_DETECTOR = {"det.hef": [_info("yolo11m/conv", (1, 11, 8400))]}
 NUM_CLASSES = {"detector": 7}
 HEF_PATHS = {"detector": "det.hef"}
@@ -68,12 +75,14 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(stats["max_ms"], 5.0)
         self.assertEqual(latency_stats([]), {"count": 0})
 
-    def test_raw_yolo_compatible(self):
-        self.assertTrue(raw_yolo_compatible([(1, 11, 8400)], 7))
-        self.assertTrue(raw_yolo_compatible([(8400, 11)], 7))
-        self.assertFalse(raw_yolo_compatible([(1, 11, 8400), (1, 64, 80, 80)], 7))  # several outputs
-        self.assertFalse(raw_yolo_compatible([(80, 80, 64)], 7))
-        self.assertFalse(raw_yolo_compatible([(1, 12, 8400)], 7))  # wrong class count
+    def test_split_heads_compatible(self):
+        outputs = [{"name": o.name, "shape": list(o.shape)} for o in SPLIT_HEADS]
+        self.assertEqual(split_heads_compatible(outputs, 7, 640), (True, None))
+        ok, reason = split_heads_compatible([{"name": "output0", "shape": [1, 11, 8400]}], 7, 640)
+        self.assertFalse(ok)
+        self.assertIn("8400 channels", reason)
+        self.assertFalse(split_heads_compatible(outputs, 8, 640)[0], "wrong class count")
+        self.assertFalse(split_heads_compatible([{"name": "nms", "shape": None}], 7, 640)[0])
 
     def test_is_nms_format(self):
         self.assertTrue(is_nms_format("FormatOrder.HAILO_NMS_BY_CLASS"))
@@ -96,27 +105,35 @@ class TestHelpers(unittest.TestCase):
 
 
 class TestInspectHefs(unittest.TestCase):
-    def test_raw_head_detector_is_decodable(self):
-        report = inspect_hefs(HEF_PATHS, NUM_CLASSES, hpf=_fake_hpf(RAW_DETECTOR))
+    def test_split_head_detector_is_readable(self):
+        report = inspect_hefs(HEF_PATHS, NUM_CLASSES, hpf=_fake_hpf(SPLIT_DETECTOR))
         det = report["models"]["detector"]
         self.assertEqual(report["hailort_version"], "4.20.0")
         self.assertFalse(det["on_chip_nms"])
-        self.assertTrue(det["decode_yolo_detections_compatible"])
+        self.assertTrue(det["hailo_detector_compatible"])
+        self.assertNotIn("incompatible_because", det)
         self.assertEqual(set(report["models"]), {"detector"})
+
+    def test_single_exported_head_is_flagged_incompatible(self):
+        det = inspect_hefs(HEF_PATHS, NUM_CLASSES, hpf=_fake_hpf(RAW_DETECTOR))["models"]["detector"]
+        self.assertFalse(det["hailo_detector_compatible"])
+        self.assertIn("8400 channels", det["incompatible_because"])
 
     def test_on_chip_nms_is_flagged_incompatible(self):
         outputs = {"det.hef": [_info("nms", (), order="FormatOrder.HAILO_NMS_BY_CLASS")]}
         det = inspect_hefs(HEF_PATHS, NUM_CLASSES, hpf=_fake_hpf(outputs))["models"]["detector"]
         self.assertTrue(det["on_chip_nms"])
-        self.assertFalse(det["decode_yolo_detections_compatible"])
+        self.assertFalse(det["hailo_detector_compatible"])
 
-    def test_per_stride_outputs_are_incompatible(self):
+    def test_merged_per_stride_outputs_are_incompatible(self):
         heads = [_info(f"conv{i}", (80 // 2**i, 80 // 2**i, 71)) for i in range(3)]
         det = inspect_hefs(HEF_PATHS, NUM_CLASSES, hpf=_fake_hpf({"det.hef": heads}))["models"]["detector"]
-        self.assertFalse(det["decode_yolo_detections_compatible"])
+        self.assertFalse(det["hailo_detector_compatible"])
 
     def test_broken_hef_is_reported(self):
-        report = inspect_hefs(HEF_PATHS, NUM_CLASSES, hpf=_fake_hpf(RAW_DETECTOR, broken_paths=("det.hef",)))
+        report = inspect_hefs(
+            HEF_PATHS, NUM_CLASSES, hpf=_fake_hpf(SPLIT_DETECTOR, broken_paths=("det.hef",))
+        )
         self.assertIn("corrupt", report["models"]["detector"]["error"])
 
     def test_hailo_not_installed(self):

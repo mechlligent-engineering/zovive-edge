@@ -16,10 +16,12 @@ node:
   # wired interface, else the first wireless one.
   identity_interface: ""
 
-# Which detector backend to run. "onnx" runs on any CPU (laptop, CI);
-# "hailo" requires the Hailo-8 + HailoRT on the Pi. Selecting this here
+# Which detector backend to run. "hailo" runs models/detector.hef on the
+# Pi's Hailo-8L; "onnx" runs models/detector.onnx on any CPU. With "hailo"
+# on a machine without HailoRT (laptop, CI) or without the .hef,
+# edge_main.py logs a warning and falls back to "onnx". Selecting this here
 # (rather than at import time) is what lets edge_main.py run unchanged
 # on a laptop and on the Pi.
 runtime:
-  backend: "onnx"   # onnx | hailo
+  backend: "hailo"   # hailo | onnx
   environment: "dev"  # dev | pi

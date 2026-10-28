@@ -8,15 +8,23 @@ __init__ rather than module load time — the module stays importable
 everywhere (for tests that only check config wiring), and only
 *constructing* HailoDetector can fail: FileNotFoundError
 for a missing .hef, and a clear InferenceBackendError for everything on
-the HailoRT side (not installed, no/busy device, a bad .hef). edge_main
-falls back to the ONNX CPU backend on either.
+the HailoRT side (not installed, no/busy device, a bad .hef, or outputs
+that are not the expected split head). edge_main falls back to the ONNX
+CPU backend on either.
+
+The HEF contract (zovive-ml hailo_config/yolov11.alls):
+- input: the 640x640 letterboxed frame (grey 114) as uint8 RGB, NHWC;
+  the HEF normalises (/ 255) on the device.
+- outputs: the detection head cut before its DFL decode — per stride
+  (8/16/32) a box conv (64 channels) and a class conv (7 channels), NHWC,
+  read as float32 and decoded on the CPU by
+  inference/yolo_postprocess.decode_split_heads, the same selection the
+  ONNX backend uses. No on-chip NMS.
 
 IMPORTANT: this follows the HailoRT Python API shape as of HailoRT
-4.x (HEF / VDevice / InferVStreams). Verify method names against
-`python3 -c "import hailo_platform; help(hailo_platform)"` on the
-actual Pi once HailoRT is installed — Hailo has changed this API
-across major versions before, and this code has not been run against
-real hardware.
+4.x (HEF / VDevice / InferVStreams) and the calls of the Pi test scripts
+that ran the HEF. tools/hef_parity.py compares its detections with the
+ONNX model's on the Pi; numbers only come from running it there.
 """
 
 from __future__ import annotations
@@ -30,7 +38,7 @@ from inference.base import Detection, Detector, InferenceBackendError
 from inference.class_names import checked_class_names
 from inference.npu_scheduler import NpuScheduler, default_scheduler
 from inference.preprocess import crop_box, letterbox  # noqa: F401 (crop_box re-exported for callers)
-from inference.yolo_postprocess import decode_yolo_detections
+from inference.yolo_postprocess import decode_split_heads, split_head_layout
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +57,7 @@ def _import_hailo():
 
 
 class _HailoRunner:
-    """HEF-loading + single-input/single-output inference helper behind
+    """HEF-loading + single-input/multi-output inference helper behind
     HailoDetector."""
 
     def __init__(self, hef_path: str, scheduler: NpuScheduler):
@@ -72,13 +80,14 @@ class _HailoRunner:
             self.network_group_params = self.network_group.create_params()
 
             self.input_vstream_info = self.hef.get_input_vstream_infos()[0]
-            self.output_vstream_info = self.hef.get_output_vstream_infos()[0]
+            self.output_vstream_infos = list(self.hef.get_output_vstream_infos())
 
-            self.input_vstreams_params = hpf.InputVStreamParams.make_from_network_group(
-                self.network_group, quantized=False, format_type=hpf.FormatType.FLOAT32
+            # uint8 in (the HEF normalises on the device), float32 out.
+            self.input_vstreams_params = hpf.InputVStreamParams.make(
+                self.network_group, format_type=hpf.FormatType.UINT8
             )
-            self.output_vstreams_params = hpf.OutputVStreamParams.make_from_network_group(
-                self.network_group, quantized=False, format_type=hpf.FormatType.FLOAT32
+            self.output_vstreams_params = hpf.OutputVStreamParams.make(
+                self.network_group, format_type=hpf.FormatType.FLOAT32
             )
 
             shape = self.input_vstream_info.shape  # (H, W, C)
@@ -92,8 +101,9 @@ class _HailoRunner:
                 f"HailoRT could not load {hef_path}: {type(exc).__name__}: {exc}"
             ) from exc
 
-    def run(self, input_tensor: np.ndarray) -> np.ndarray:
-        """`input_tensor`: HxWxC float32, NHWC (Hailo's native layout)."""
+    def run(self, input_tensor: np.ndarray) -> dict[str, np.ndarray]:
+        """`input_tensor`: HxWxC uint8, NHWC (Hailo's native layout).
+        Returns every output by name, batch dimension removed."""
         hpf = self._hpf
 
         def _infer():
@@ -103,7 +113,7 @@ class _HailoRunner:
                 with self.network_group.activate(self.network_group_params):
                     input_data = {self.input_vstream_info.name: input_tensor[np.newaxis, ...]}
                     results = infer_pipeline.infer(input_data)
-                    return results[self.output_vstream_info.name]
+                    return {name: np.asarray(value)[0] for name, value in results.items()}
 
         return self.scheduler.run(_infer)
 
@@ -116,13 +126,12 @@ class _HailoRunner:
             log.exception("error releasing Hailo VDevice")
 
 
-def _to_nhwc_float(image_letterboxed) -> np.ndarray:
-    # letterbox() returns BGR; Hailo models compiled from Ultralytics
-    # exports generally expect RGB, matching the ONNX path.
+def _to_nhwc_uint8_rgb(image_letterboxed) -> np.ndarray:
+    # letterbox() returns BGR; the model was trained on RGB, matching the
+    # ONNX path. Pixel values stay 0-255: the HEF divides by 255 itself.
     import cv2
 
-    rgb = cv2.cvtColor(image_letterboxed, cv2.COLOR_BGR2RGB)
-    return rgb.astype(np.float32) / 255.0
+    return np.ascontiguousarray(cv2.cvtColor(image_letterboxed, cv2.COLOR_BGR2RGB))
 
 
 class HailoDetector(Detector):
@@ -139,13 +148,24 @@ class HailoDetector(Detector):
         self.iou_threshold = iou_threshold
         self._runner = _HailoRunner(hef_path, scheduler or default_scheduler)
         self.input_size = self._runner.input_size
+        try:
+            self._heads = split_head_layout(
+                {info.name: tuple(info.shape) for info in self._runner.output_vstream_infos},
+                len(self.class_names),
+                self.input_size,
+            )
+        except ValueError as exc:
+            # Not the split head this decoder reads (e.g. a different cut
+            # or on-chip NMS): release the device and let the CPU fallback run.
+            self._runner.close()
+            raise InferenceBackendError(f"{hef_path}: {exc}") from exc
 
     def infer(self, frame) -> list[Detection]:
         padded, ratio, pad = letterbox(frame, self.input_size)
-        tensor = _to_nhwc_float(padded)
-        raw_output = self._runner.run(tensor)
-        return decode_yolo_detections(
-            raw_output,
+        outputs = self._runner.run(_to_nhwc_uint8_rgb(padded))
+        return decode_split_heads(
+            outputs,
+            self._heads,
             self.class_names,
             ratio,
             pad,
