@@ -43,11 +43,14 @@ Three separate processes/systemd units, so a stuck one can't stall the
 others:
 
 - `edge_main.py` — the pipeline above.
-- `transfer_main.py` — polls `db/outbox` for pending events *and*
-  pending video clips (independently — see "Event video" below),
-  sends each to the base station (`network/base_station_client.py`),
-  retries failed ones with backoff (`network/transfer_state.py`, one
-  instance per kind so a slow video upload never delays image alerts).
+- `transfer_main.py` — claims due events *and* due video clips from
+  `db/outbox` (two independent queues — see "Event video" below),
+  sends each to the base station (`network/base_station_client.py`).
+  Retry state is stored on the outbox rows (`db/outbox.claim_due`), so it
+  survives restarts; `network/retry_policy.py` has the rules: an HTTP 4xx
+  rejection costs a retry (30 s, 1 m, 2 m, 5 m, 15 m, then dead-lettered),
+  an unreachable or busy base station pauses the queue and is probed
+  about once a minute at no cost.
 - `health_main.py` — periodic heartbeat: queue depths, stream health,
   disk usage, Pi throttle status.
 

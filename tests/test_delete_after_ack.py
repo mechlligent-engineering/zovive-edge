@@ -24,7 +24,7 @@ from db.outbox import (
     set_video_path,
 )
 from network.base_station_client import BaseStationError
-from network.transfer_state import TransferState
+from network.retry_policy import RetryPolicy
 from transfer_main import _send_pending_images, _send_pending_videos, run
 from utils import config_loader
 
@@ -75,7 +75,7 @@ class TestDeleteImageAfterAck(unittest.TestCase):
 
     def test_ack_deletes_local_snapshot_when_enabled(self):
         client = _FakeImageClient(fail=False)
-        _send_pending_images(client, TransferState(), batch_size=10, delete_after_ack=True)
+        _send_pending_images(client, RetryPolicy(), batch_size=10, delete_after_ack=True)
 
         self.assertFalse(self.snapshot_path.exists(), "local snapshot should be deleted after ack")
         row = get_pending(limit=10)
@@ -83,18 +83,17 @@ class TestDeleteImageAfterAck(unittest.TestCase):
 
     def test_ack_keeps_local_snapshot_when_disabled(self):
         client = _FakeImageClient(fail=False)
-        _send_pending_images(client, TransferState(), batch_size=10, delete_after_ack=False)
+        _send_pending_images(client, RetryPolicy(), batch_size=10, delete_after_ack=False)
 
         self.assertTrue(self.snapshot_path.exists(), "snapshot must be kept when the flag is off")
 
     def test_no_ack_keeps_local_snapshot_and_retries(self):
         client = _FakeImageClient(fail=True)
-        _send_pending_images(client, TransferState(), batch_size=10, delete_after_ack=True)
+        _send_pending_images(client, RetryPolicy(), batch_size=10, delete_after_ack=True)
 
         self.assertTrue(self.snapshot_path.exists(), "a failed send must never delete the local file")
-        # Still shows up for retry (status='failed', not deleted from the
-        # pending pool by delete-after-ack logic — that's the outbox's
-        # own retry mechanism, unaffected by this feature).
+        # Still queued for retry (status='failed' with its retry time on the
+        # row — the outbox's own retry mechanism, unaffected by this feature).
         from db.outbox import count_by_status
 
         self.assertEqual(count_by_status(), {"failed": 1})
@@ -103,7 +102,7 @@ class TestDeleteImageAfterAck(unittest.TestCase):
         # Callers that don't pass delete_after_ack explicitly (e.g. an
         # older direct caller) must keep the pre-existing, safe behavior.
         client = _FakeImageClient(fail=False)
-        _send_pending_images(client, TransferState(), batch_size=10)
+        _send_pending_images(client, RetryPolicy(), batch_size=10)
 
         self.assertTrue(self.snapshot_path.exists())
 
@@ -133,14 +132,14 @@ class TestDeleteVideoAfterAck(unittest.TestCase):
 
     def test_ack_deletes_local_video_when_enabled(self):
         client = _FakeVideoClient(fail=False)
-        _send_pending_videos(client, TransferState(), batch_size=10, timeout_sec=30.0, delete_after_ack=True)
+        _send_pending_videos(client, RetryPolicy(), batch_size=10, timeout_sec=30.0, delete_after_ack=True)
 
         self.assertFalse(self.video_path.exists(), "local clip should be deleted after ack")
         self.assertEqual(get_pending_videos(), [])
 
     def test_no_ack_keeps_local_video_and_retries(self):
         client = _FakeVideoClient(fail=True)
-        _send_pending_videos(client, TransferState(), batch_size=10, timeout_sec=30.0, delete_after_ack=True)
+        _send_pending_videos(client, RetryPolicy(), batch_size=10, timeout_sec=30.0, delete_after_ack=True)
 
         self.assertTrue(self.video_path.exists(), "a failed send must never delete the local clip")
 

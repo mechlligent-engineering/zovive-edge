@@ -8,6 +8,12 @@ evidence first.
 `max_backlog_bandwidth_mbps` and the link throughput. Backlog with a healthy link means
 the base station is NAKing - check the protocol version on both sides.
 
+**Uploads dead-lettered.** The heartbeat's backlog shows `dead_snapshots` /
+`dead_videos`: the base station rejected those uploads (HTTP 4xx) more than
+`transfer.retry.max_retries` times; their files are kept. Fix the cause (journal:
+`journalctl -u zovive-transfer | grep "dead-lettered"`), then on the node run
+`.venv/bin/python transfer_main.py --requeue-dead` to give them a fresh retry budget.
+
 **Disk filling.** `storage/disk_guard.py --report`. If unacked count is high the link has
 been down; if acked artifacts are not being purged, `purge_service` is failing - check
 `purge.log` and the journal table.

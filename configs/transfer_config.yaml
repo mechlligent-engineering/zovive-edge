@@ -15,8 +15,22 @@ base_station:
 transfer:
   poll_interval_sec: 5.0
   batch_size: 10
-  retry_initial_backoff_sec: 2.0
-  retry_max_backoff_sec: 300.0
+  # Upload retries, the same rules for image alerts and clips; the retry
+  # state is stored on each outbox row (network/retry_policy.py).
+  retry:
+    # Only an HTTP 4xx rejection (other than 429) costs a retry: after the
+    # n-th one the item waits schedule_sec[n-1] (+/- jitter), and after more
+    # than max_retries it is dead-lettered (re-queue with
+    # `python transfer_main.py --requeue-dead`).
+    schedule_sec: [30, 60, 120, 300, 900]
+    max_retries: 5
+    jitter: 0.2
+    # Base station unreachable (DNS, refused, connect timeout, TLS) or busy
+    # (5xx, 429, 3xx, read timeout): costs nothing; the queue waits about
+    # pause_sec and then probes again. A 429's Retry-After is honoured up to
+    # max_pause_sec.
+    pause_sec: 60
+    max_pause_sec: 900
   # Video clips (pipeline/clip_extractor.py) are larger than the image
   # alert and finish on their own timeline, so they get their own
   # enable flag, batch size and timeout rather than sharing the image
@@ -24,8 +38,6 @@ transfer:
   video_upload_enabled: true
   video_batch_size: 3
   video_upload_timeout_sec: 60.0
-  video_retry_initial_backoff_sec: 5.0
-  video_retry_max_backoff_sec: 300.0
   # Delete the local file the moment its own ACK is recorded. Off: ACKed
   # media is kept on the Pi for retention_policy.yaml's retention_days and
   # then deleted by storage/retention_manager.py (or earlier under storage

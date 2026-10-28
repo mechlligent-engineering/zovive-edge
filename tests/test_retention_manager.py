@@ -31,7 +31,7 @@ from db import init_db as init_db_module
 from db.init_db import get_connection, init_db
 from db.outbox import EventRecord, get_event, insert_event
 from network.base_station_client import BaseStationClient, BaseStationError
-from network.transfer_state import TransferState
+from network.retry_policy import RetryPolicy
 from storage import retention_manager
 from storage.retention_manager import (
     EXIT_CONFIG,
@@ -432,10 +432,10 @@ class AckRecordingTests(RetentionTestCase):
         return ev
 
     def send_images(self, client, **kwargs) -> None:
-        transfer_main._send_pending_images(client, TransferState(), batch_size=10, **kwargs)
+        transfer_main._send_pending_images(client, RetryPolicy(), batch_size=10, **kwargs)
 
     def send_videos(self, client, **kwargs) -> None:
-        transfer_main._send_pending_videos(client, TransferState(), batch_size=10, timeout_sec=5.0, **kwargs)
+        transfer_main._send_pending_videos(client, RetryPolicy(), batch_size=10, timeout_sec=5.0, **kwargs)
 
     def test_valid_ack_is_recorded(self):
         ev = self.pending_event(video=True)

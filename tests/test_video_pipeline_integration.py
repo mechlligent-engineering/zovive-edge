@@ -27,7 +27,7 @@ from db.outbox import get_pending, get_pending_videos, set_video_path
 from edge_main import _pipeline_loop
 from inference.base import Detection
 from inference.bytetrack_wrapper import IouTracker
-from network.transfer_state import TransferState
+from network.retry_policy import RetryPolicy
 from pipeline.alert_dispatcher import AlertDispatcher
 from pipeline.best_snapshot import BestSnapshotStore
 from pipeline.clip_extractor import ClipExtractor
@@ -159,7 +159,7 @@ class TestVideoPipelineIntegration(unittest.TestCase):
             def send_video(self, event_id, video_bytes, timeout_sec=None):
                 uploaded.append((event_id, len(video_bytes)))
 
-        _send_pending_videos(_FakeClient(), TransferState(), batch_size=10, timeout_sec=30.0)
+        _send_pending_videos(_FakeClient(), RetryPolicy(), batch_size=10, timeout_sec=30.0)
 
         self.assertEqual(len(uploaded), 1)
         self.assertEqual(uploaded[0][0], event_id)

@@ -58,6 +58,28 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "ALTER TABLE events ADD COLUMN video_acked_ts REAL",
         ],
     ),
+    # Adds the durable upload retry queue (transfer_main.py, db/outbox.py
+    # claim_due). Rows that are already 'failed' keep NULL next_retry_ts,
+    # i.e. they are due immediately: before this version nothing ever
+    # retried them, so their attempt_count is at most a few.
+    (
+        5,
+        [
+            "ALTER TABLE events ADD COLUMN next_retry_ts REAL",
+            "ALTER TABLE events ADD COLUMN send_claim TEXT",
+            "ALTER TABLE events ADD COLUMN video_next_retry_ts REAL",
+            "ALTER TABLE events ADD COLUMN video_send_claim TEXT",
+        ],
+    ),
+]
+
+# Indexes on columns that a migration adds. They cannot live in schema.sql,
+# which also runs (via init_db) against an existing older database before
+# migrate() has added the columns; migrate() creates them for every database,
+# fresh or upgraded.
+POST_MIGRATION_INDEXES: list[str] = [
+    "CREATE INDEX IF NOT EXISTS idx_events_send_queue ON events(status, next_retry_ts)",
+    "CREATE INDEX IF NOT EXISTS idx_events_video_queue ON events(video_status, video_next_retry_ts)",
 ]
 
 
@@ -81,4 +103,7 @@ def migrate(conn: sqlite3.Connection) -> int:
                 (str(target_version),),
             )
         version = target_version
+    with conn:
+        for stmt in POST_MIGRATION_INDEXES:
+            conn.execute(stmt)
     return version
