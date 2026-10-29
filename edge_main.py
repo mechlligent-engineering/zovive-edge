@@ -45,6 +45,7 @@ from db.migrations import migrate
 from db.outbox import set_video_path
 from inference.base import Detector
 from inference.bytetrack_wrapper import IouTracker
+from inference.class_thresholds import ClassThresholds
 from inference.onnx_inference import OnnxDetector
 from inference.preprocess import crop_box
 from inference.sahi_slicer import SahiConfig, SahiDetector, is_sahi_enabled
@@ -163,7 +164,11 @@ def _inference_loop(
     stop_event: threading.Event,
     max_cycles: int | None = None,
     status: EdgeStatus | None = None,
+    class_thresholds: ClassThresholds | None = None,
 ) -> None:
+    """`class_thresholds` (inference/class_thresholds.py) drops detections
+    below their species' threshold before anything downstream sees them;
+    None keeps every detection the detector returned."""
     last_seq = 0
     cycles = 0
     while not stop_event.is_set():
@@ -182,6 +187,8 @@ def _inference_loop(
             if status is not None:
                 status.inference_failed()
             continue
+        if class_thresholds is not None:
+            detections = class_thresholds.keep(detections)
         if status is not None:
             status.inference_ok(len(detections))
         detection_queue.put(
@@ -412,6 +419,11 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
 
     detector = build_detector(node_cfg, inf_cfg)
     detector.warmup()
+    class_thresholds = ClassThresholds.from_config(inf_cfg["detector"])
+    log.info(
+        "class confidence thresholds",
+        extra={"default": class_thresholds.default, "per_class": dict(class_thresholds.per_class)},
+    )
 
     frame_slot = LatestFrameSlot()
 
@@ -471,7 +483,14 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
         SupervisedThread(
             "inference",
             lambda: _inference_loop(
-                detector, frame_slot, detection_queue, camera_id, _shutdown_event, max_cycles, edge_status
+                detector,
+                frame_slot,
+                detection_queue,
+                camera_id,
+                _shutdown_event,
+                max_cycles,
+                edge_status,
+                class_thresholds=class_thresholds,
             ),
             liveness=edge_status.inference_loop_ts,
         )

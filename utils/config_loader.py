@@ -453,10 +453,102 @@ def _camera_host_issues(cam: Mapping[str, Any], source: str, env: Mapping[str, s
     ]
 
 
+# The detectors decode at this threshold when inference_config.yaml sets none
+# (inference/class_thresholds.py DEFAULT_CONFIDENCE_THRESHOLD).
+_DEFAULT_DECODE_THRESHOLD = 0.45
+
+
+def _number_issue(
+    value: Any,
+    source: str,
+    key: str,
+    *,
+    integer: bool = False,
+    gt: float | None = None,
+    min_value: float | None = None,
+    max_value: float | None = None,
+) -> ConfigIssue | None:
+    """None if `value` is a number (an int when `integer`) in range."""
+    if isinstance(value, bool) or not isinstance(value, int if integer else (int, float)):
+        expected = "an integer" if integer else "a number"
+        return ConfigIssue(source, key, f"expected {expected}, got {value!r}", IssueKind.INVALID_TYPE)
+    if gt is not None and not value > gt:
+        return ConfigIssue(source, key, f"{value} must be greater than {gt}")
+    if min_value is not None and value < min_value:
+        return ConfigIssue(source, key, f"{value} must be at least {min_value}")
+    if max_value is not None and value > max_value:
+        return ConfigIssue(source, key, f"{value} must be at most {max_value}")
+    return None
+
+
+def _check_inference_config(
+    data: Mapping[str, Any], source: str, env: Mapping[str, str]
+) -> list[ConfigIssue]:  # noqa: ARG001
+    """detector.class_confidence_thresholds must name the model's own classes
+    and must not sit below detector.confidence_threshold, the threshold the
+    detector decodes at: a lower one could never take effect, and a misspelt
+    class would silently leave that species at the default."""
+    det = data.get("detector")
+    if det is None:
+        return [ConfigIssue(source, "detector", "required section is missing", IssueKind.MISSING_KEY)]
+    if not isinstance(det, Mapping):
+        return [
+            ConfigIssue(
+                source, "detector", f"expected a mapping, got {type(det).__name__}", IssueKind.INVALID_TYPE
+            )
+        ]
+    issues: list[ConfigIssue] = []
+
+    default = det.get("confidence_threshold", _DEFAULT_DECODE_THRESHOLD)
+    problem = _number_issue(default, source, "detector.confidence_threshold", gt=0.0, max_value=1.0)
+    if problem is not None:
+        issues.append(problem)
+        default = None
+
+    per_class = det.get("class_confidence_thresholds")
+    if per_class is None:
+        return issues
+    if not isinstance(per_class, Mapping):
+        issues.append(
+            ConfigIssue(
+                source,
+                "detector.class_confidence_thresholds",
+                f"expected a mapping of class name to threshold, got {type(per_class).__name__}",
+                IssueKind.INVALID_TYPE,
+            )
+        )
+        return issues
+    classes = det.get("classes")
+    known = [str(c) for c in classes] if isinstance(classes, list) else None
+    for name, value in per_class.items():
+        key = f"detector.class_confidence_thresholds.{name}"
+        if known is not None and str(name) not in known:
+            issues.append(
+                ConfigIssue(
+                    source, key, f"is not one of detector.classes ({', '.join(known)})", IssueKind.UNKNOWN_KEY
+                )
+            )
+            continue
+        problem = _number_issue(value, source, key, gt=0.0, max_value=1.0)
+        if problem is not None:
+            issues.append(problem)
+        elif default is not None and value < default:
+            issues.append(
+                ConfigIssue(
+                    source,
+                    key,
+                    f"{value} is below detector.confidence_threshold ({default}), the threshold the detector"
+                    " decodes at, so it could never take effect",
+                )
+            )
+    return issues
+
+
 # Checks load() runs on a file's interpolated data, keyed by file name. Their
 # issues are reported together with any missing environment variables.
 _RUNTIME_CHECKS: dict[str, Callable[[Mapping[str, Any], str, Mapping[str, str]], list[ConfigIssue]]] = {
     "rtsp_config.yaml": _check_rtsp_camera,
+    "inference_config.yaml": _check_inference_config,
 }
 
 
@@ -467,7 +559,8 @@ def load(path: str | Path, required: bool = True) -> dict[str, Any]:
     ``ConfigError`` listing every problem: missing/malformed file, every
     ``${VAR}`` without a default whose variable is unset or empty, and
     anything the file's ``_RUNTIME_CHECKS`` entry rejects (rtsp_config.yaml:
-    camera.host and the camera credentials). A failed load is not cached. A
+    camera.host and the camera credentials; inference_config.yaml: the
+    detector's confidence thresholds). A failed load is not cached. A
     missing file with ``required=False`` loads as ``{}``.
     """
     p = Path(path).resolve()

@@ -18,7 +18,22 @@ detector:
     - sloth_bear
     - tiger
     - wild_boar
-  confidence_threshold: 0.45
+  # The detector decodes every class at this threshold.
+  confidence_threshold: 0.50
+  # Per species, a detection below its own threshold is dropped right after
+  # inference, before tracking (inference/class_thresholds.py); a class not
+  # listed keeps confidence_threshold. Each must be one of `classes` and at
+  # least confidence_threshold. Values chosen on the 679-image test split
+  # (docs/PIPELINE_HARDENING_SPEC.md): higher ones cost recall, notably
+  # tiger, for no precision gain.
+  class_confidence_thresholds:
+    elephant: 0.60
+    gaur: 0.60
+    leopard: 0.55
+    wild_boar: 0.55
+    tiger: 0.50
+    sloth_bear: 0.50
+    deer: 0.50
   nms_iou_threshold: 0.45
   # A track needs an animal in at least this many of the last N frames
   # before stage1_gate promotes it to a real event (see track_state_machine.py).
@@ -34,7 +49,8 @@ detector:
 stage2:
   # Below this voted detector confidence, stage2_verifier reports
   # "unknown_animal" with the snapshot instead of a (possibly wrong)
-  # species name. The detector itself keeps boxes from 0.45 up.
+  # species name. The detector keeps boxes from confidence_threshold (or
+  # the species' class_confidence_thresholds value) up.
   min_confidence: 0.55
   # Vote over at most this many of the track's most recent frames.
   max_frames_per_track: 10
