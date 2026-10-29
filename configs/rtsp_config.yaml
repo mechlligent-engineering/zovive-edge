@@ -1,30 +1,36 @@
-# CP Plus camera stream settings.
-# Two profiles: sub-stream for continuous detection (low res, low CPU
-# decode cost — the Pi 5 has no H.264 hardware decoder), main-stream
-# pulled once on trigger for a high-res snapshot.
+# CP Plus CP-UNC-TE41ZL6C-VMDS-Q stream settings.
+# Fixed encoder profiles, set once on the camera and never changed at
+# runtime (changing them restarts every stream, including the live view):
+#   sub_stream  - 720p detection stream (low CPU decode cost; the Pi 5 has
+#                 no H.264 hardware decoder). Also the live view if the
+#                 camera has no third stream.
+#   main_stream - 4MP evidence stream.
+# width/height/fps below are what the camera encoder is EXPECTED to send.
+# capture/rtsp_reader.py reads at the encoder rate and never throttles;
+# tools/camera_probe.py reports any mismatch with these values.
 camera:
-  # Credentials come ONLY from the environment (/opt/zovive/.env, loaded by
-  # systemd; see .env.example). No default: edge_main.py refuses to start if
-  # either is unset or empty. Never put a real value in this tracked file.
-  host: "${ZOVIVE_CAMERA_HOST:-192.168.1.64}"
+  # Deployment default; ZOVIVE_CAMERA_HOST overrides it per node. Keep the
+  # default identical in configs/camera.yaml.
+  host: "${ZOVIVE_CAMERA_HOST:-192.168.1.250}"
   username: "${ZOVIVE_CAMERA_USERNAME}"
   password: "${ZOVIVE_CAMERA_PASSWORD}"
+  onvif_username: "${ZOVIVE_ONVIF_USERNAME}"
+  onvif_password: "${ZOVIVE_ONVIF_PASSWORD}"
 
   sub_stream:
-    # rtsp URL template; {host}/{user}/{pass} filled in at runtime.
-    url: "rtsp://{user}:{pass}@{host}:554/cam/realmonitor?channel=1&subtype=1"
-    width: 640
-    height: 360
-    target_fps: 8
+    url: "rtsp://{user}:{pass}@{host}:554/video/live?channel=1&subtype=1"
+    width: 704
+    height: 576
+    fps: 25
 
   main_stream:
-    url: "rtsp://{user}:{pass}@{host}:554/cam/realmonitor?channel=1&subtype=0"
-    width: 1920
-    height: 1080
+    url: "rtsp://{user}:{pass}@{host}:554/video/live?channel=1&subtype=0"
+    width: 2688
+    height: 1520
+    fps: 25
 
 reconnect:
   initial_backoff_sec: 1.0
   max_backoff_sec: 30.0
   backoff_multiplier: 2.0
-  # Log + increment stream_health.stalled_count if no frame arrives for this long.
   stall_timeout_sec: 5.0

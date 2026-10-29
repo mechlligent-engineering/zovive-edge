@@ -1,6 +1,6 @@
 """ONNX Runtime backend — runs on the laptop, in CI, and on the Pi CPU
-(used there for the classifier, which only runs on-trigger so CPU cost
-is acceptable; the always-on detector uses hailo_inference.py instead).
+(there only as the fallback when the Hailo backend in hailo_inference.py
+can't start).
 
 This is what lets the entire pipeline be developed and tested without
 a Hailo device: configs/node_config.yaml's `runtime.backend: onnx`
@@ -14,9 +14,10 @@ import logging
 import numpy as np
 import onnxruntime as ort
 
-from inference.base import ClassificationResult, Classifier, Detection, Detector, InferenceBackendError
+from inference.base import Detection, Detector, InferenceBackendError
+from inference.class_names import checked_class_names, embedded_class_names
 from inference.preprocess import letterbox, to_chw_float32
-from inference.yolo_postprocess import decode_yolo_detections, softmax
+from inference.yolo_postprocess import decode_yolo_detections
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +32,10 @@ def _make_session(onnx_path: str) -> ort.InferenceSession:
         raise InferenceBackendError(f"failed to load ONNX model {onnx_path}: {exc}") from exc
 
 
+def _embedded_names(session: ort.InferenceSession) -> list[str] | None:
+    return embedded_class_names(session.get_modelmeta().custom_metadata_map)
+
+
 class OnnxDetector(Detector):
     def __init__(
         self,
@@ -40,11 +45,13 @@ class OnnxDetector(Detector):
         conf_threshold: float = 0.45,
         iou_threshold: float = 0.45,
     ):
-        self.class_names = class_names
         self.input_size = input_size
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
         self.session = _make_session(onnx_path)
+        self.class_names = checked_class_names(
+            class_names, onnx_path, model_names=_embedded_names(self.session)
+        )
         self._input_name = self.session.get_inputs()[0].name
 
     def infer(self, frame) -> list[Detection]:
@@ -59,39 +66,6 @@ class OnnxDetector(Detector):
             orig_shape=frame.shape[:2],
             conf_threshold=self.conf_threshold,
             iou_threshold=self.iou_threshold,
-        )
-
-    def warmup(self) -> None:
-        dummy = np.zeros((self.input_size, self.input_size, 3), dtype=np.uint8)
-        self.infer(dummy)
-
-
-class OnnxClassifier(Classifier):
-    def __init__(self, onnx_path: str, class_names: list[str], input_size: int = 224):
-        self.class_names = class_names
-        self.input_size = input_size
-        self.session = _make_session(onnx_path)
-        self._input_name = self.session.get_inputs()[0].name
-
-    def infer(self, crop) -> ClassificationResult:
-        if crop is None or crop.size == 0 or min(crop.shape[:2]) == 0:
-            return ClassificationResult(class_id=-1, class_name="invalid_crop", confidence=0.0)
-
-        padded, _ratio, _pad = letterbox(crop, self.input_size)
-        tensor = to_chw_float32(padded)
-        outputs = self.session.run(None, {self._input_name: tensor})
-        raw = np.asarray(outputs[0]).reshape(-1)
-
-        # YOLO11-cls export is usually already softmaxed; normalize defensively
-        # in case a raw-logit export is swapped in later.
-        scores = raw if np.isclose(raw.sum(), 1.0, atol=1e-2) else softmax(raw)
-
-        class_id = int(np.argmax(scores))
-        return ClassificationResult(
-            class_id=class_id,
-            class_name=self.class_names[class_id] if class_id < len(self.class_names) else str(class_id),
-            confidence=float(scores[class_id]),
-            all_scores=scores.tolist(),
         )
 
     def warmup(self) -> None:

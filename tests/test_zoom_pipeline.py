@@ -1,4 +1,4 @@
-"""Far animal -> zoom in -> autofocus -> re-detect/classify -> one alert.
+"""Far animal -> zoom in -> autofocus -> re-detect/vote species -> one alert.
 
 Runs edge_main's real pipeline loop with FakeLensCamera and zero settle
 times, so each lens phase takes exactly one pipeline cycle:
@@ -33,7 +33,7 @@ from pipeline.zone_filter import ZoneFilter
 from queues.alert_queue import AlertQueue
 from queues.detection_queue import DetectionBatch, DetectionQueue
 from storage.evidence_store import EvidenceStore
-from tests.helpers import AlwaysClassifier, blank_frame
+from tests.helpers import blank_frame
 
 FAR_BOX = (300, 170, 340, 190)  # small, centred in a 640x360 frame
 ZOOMED_BOX = (160, 60, 480, 300)
@@ -81,7 +81,6 @@ class TestZoomPipeline(unittest.TestCase):
         )
         _pipeline_loop(
             queue,
-            AlwaysClassifier("tiger", 0.92),
             self.zoom,
             IouTracker(iou_match_threshold=0.3, max_age_frames=15, min_hits_to_confirm=1, presence_window=5),
             TrackStateMachine(Stage1Gate(Stage1Config(min_hits_in_window=3, window_size=5))),
@@ -89,7 +88,7 @@ class TestZoomPipeline(unittest.TestCase):
             MotionGate(),
             BestSnapshotStore(),
             dispatcher,
-            inf_cfg={"classifier": {"max_crops_per_track": 5, "min_confidence": 0.5}},
+            inf_cfg={"stage2": {"min_confidence": 0.5}},
             model_version="test-v1",
             stop_event=threading.Event(),
             max_cycles=len(per_cycle_detections),
@@ -118,6 +117,9 @@ class TestZoomPipeline(unittest.TestCase):
 
         self.assertEqual(len(pending), 1, pending)
         self.assertEqual(pending[0]["preset_name"], "wide")
+        # Species voted from the wide track's own detector frames.
+        self.assertEqual(pending[0]["animal_name"], "tiger")
+        self.assertAlmostEqual(pending[0]["confidence"], 0.9, places=6)
         self.assertTrue(Path(pending[0]["snapshot_path"]).exists())
 
     def test_close_animal_is_alerted_without_zoom(self):

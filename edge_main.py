@@ -12,11 +12,12 @@ an earlier one:
         into `detection_queue` (bounded, drop-oldest)
             v
     pipeline thread  (this file: `_pipeline_loop`)
-        tracker -> per-track state machine -> zone filter -> best-crop
-        collection -> stage2 classification -> alert dispatch. A confirmed
-        animal that is far away is first zoomed in on (optical zoom +
-        autofocus only; the camera never pans or tilts), re-detected and
-        re-classified in the zoomed view, and alerted with that snapshot
+        tracker -> per-track state machine -> zone filter -> best-snapshot
+        collection -> stage2 species vote over the detector's own per-frame
+        classes (single-stage: there is no second model) -> alert dispatch.
+        A confirmed animal that is far away is first zoomed in on (optical
+        zoom + autofocus only; the camera never pans or tilts), re-detected
+        and voted again in the zoomed view, and alerted with that snapshot
 
 transfer_main.py and health_main.py are separate processes/systemd
 units on purpose (see their own docstrings): nothing in this file
@@ -42,9 +43,9 @@ from capture.rtsp_reader import RtspReader
 from db.init_db import init_db
 from db.migrations import migrate
 from db.outbox import set_video_path
-from inference.base import Classifier, Detector
+from inference.base import Detector
 from inference.bytetrack_wrapper import IouTracker
-from inference.onnx_inference import OnnxClassifier, OnnxDetector
+from inference.onnx_inference import OnnxDetector
 from inference.preprocess import crop_box
 from inference.sahi_slicer import SahiConfig, SahiDetector, is_sahi_enabled
 from logger_setup import configure_root, get_logger
@@ -60,7 +61,7 @@ from queues.alert_queue import AlertQueue
 from queues.detection_queue import DetectionBatch, DetectionQueue
 from queues.frame_queue import LatestFrameSlot
 from queues.queue_monitor import snapshot as queues_snapshot
-from utils.config_loader import ConfigError, load
+from utils.config_loader import ConfigError, camera_host_source, load
 from watchdog import sd_notify
 from watchdog.edge_status import EdgeStatus, write_status_file
 from watchdog.restart_history import record_exit, record_start
@@ -83,31 +84,34 @@ def _handle_signal(signum, frame):  # noqa: ARG001
     _shutdown_event.set()
 
 
-def _build_onnx_backend(det_cfg: dict, cls_cfg: dict) -> tuple[Detector, Classifier]:
-    detector: Detector = OnnxDetector(
+def _resolve_model_paths(cfg: dict) -> dict:
+    """Copy of the detector section with onnx_path/hef_path made absolute
+    by paths.model_file (a copy: load() caches the dict it returns)."""
+    return {**cfg, **{k: str(paths.model_file(cfg[k])) for k in ("onnx_path", "hef_path") if cfg.get(k)}}
+
+
+def _build_onnx_detector(det_cfg: dict) -> Detector:
+    return OnnxDetector(
         det_cfg["onnx_path"],
         det_cfg["classes"],
         input_size=int(det_cfg.get("input_size", 640)),
         conf_threshold=float(det_cfg.get("confidence_threshold", 0.45)),
         iou_threshold=float(det_cfg.get("nms_iou_threshold", 0.45)),
     )
-    classifier: Classifier = OnnxClassifier(
-        cls_cfg["onnx_path"], cls_cfg["classes"], input_size=int(cls_cfg.get("input_size", 224))
-    )
-    return detector, classifier
 
 
-def build_detector_and_classifier(node_cfg: dict, inf_cfg: dict) -> tuple[Detector, Classifier]:
+def build_detector(node_cfg: dict, inf_cfg: dict) -> Detector:
+    """The single model the node runs: the 7-species detector (Hailo, or
+    ONNX on the CPU). Species come straight from its classes."""
     backend = node_cfg.get("runtime", {}).get("backend", "onnx")
-    det_cfg = inf_cfg["detector"]
-    cls_cfg = inf_cfg["classifier"]
+    det_cfg = _resolve_model_paths(inf_cfg["detector"])
 
     if backend == "hailo":
         # Imported lazily: hailo_platform isn't installed off-Pi, and we
         # don't want importing this module to fail on a laptop just
         # because the ONNX branch was the one actually taken.
         from inference.base import InferenceBackendError
-        from inference.hailo_inference import HailoClassifier, HailoDetector
+        from inference.hailo_inference import HailoDetector
 
         try:
             detector: Detector = HailoDetector(
@@ -116,20 +120,21 @@ def build_detector_and_classifier(node_cfg: dict, inf_cfg: dict) -> tuple[Detect
                 conf_threshold=float(det_cfg.get("confidence_threshold", 0.45)),
                 iou_threshold=float(det_cfg.get("nms_iou_threshold", 0.45)),
             )
-            classifier: Classifier = HailoClassifier(cls_cfg["hef_path"], cls_cfg["classes"])
-        except InferenceBackendError:
-            # CPU fallback: HailoRT missing, no device present, or a bad
-            # .hef — rather than crash-looping the whole process (systemd
-            # would just restart it into the same failure), fall back to
-            # the ONNX backend on the Pi's CPU so detection keeps running
-            # in a degraded-but-alive state until the Hailo path is fixed.
-            log.exception(
+        except (InferenceBackendError, FileNotFoundError) as exc:
+            # CPU fallback: .hef missing (FileNotFoundError), HailoRT not
+            # installed, no/busy device, or a bad .hef (hailo_inference
+            # reports those as InferenceBackendError) — rather than
+            # crash-looping the whole process (systemd would just restart it
+            # into the same failure), fall back to the ONNX backend on the
+            # Pi's CPU so detection keeps running in a degraded-but-alive
+            # state until the Hailo path is fixed.
+            log.warning(
                 "hailo backend failed to initialize; falling back to onnx (CPU) backend",
-                extra={"hef_detector": det_cfg.get("hef_path"), "hef_classifier": cls_cfg.get("hef_path")},
+                extra={"hef_detector": det_cfg.get("hef_path"), "error": f"{type(exc).__name__}: {exc}"},
             )
-            detector, classifier = _build_onnx_backend(det_cfg, cls_cfg)
+            detector = _build_onnx_detector(det_cfg)
     else:
-        detector, classifier = _build_onnx_backend(det_cfg, cls_cfg)
+        detector = _build_onnx_detector(det_cfg)
 
     if is_sahi_enabled(inf_cfg):
         sahi_cfg = SahiConfig.from_config(inf_cfg)
@@ -139,7 +144,7 @@ def build_detector_and_classifier(node_cfg: dict, inf_cfg: dict) -> tuple[Detect
         )
         detector = SahiDetector(detector, sahi_cfg)
 
-    return detector, classifier
+    return detector
 
 
 def build_camera(node_cfg: dict, rtsp_cfg: dict):
@@ -194,10 +199,9 @@ def _inference_loop(
     log.info("inference loop stopped")
 
 
-def _classify_and_dispatch(
-    classifier: Classifier,
-    cls_cfg: dict,
-    crops: list,
+def _verify_and_dispatch(
+    votes: list[tuple[str, float]],
+    stage2_cfg: dict,
     snapshot_image,
     track_id: str,
     dispatcher: AlertDispatcher,
@@ -205,10 +209,9 @@ def _classify_and_dispatch(
     model_version: str,
 ) -> tuple[VerifiedResult, str | None]:
     result = verify_track(
-        classifier,
-        crops,
-        min_confidence=float(cls_cfg.get("min_confidence", 0.55)),
-        strategy=cls_cfg.get("voting_strategy", "average"),
+        votes,
+        min_confidence=float(stage2_cfg.get("min_confidence", 0.55)),
+        strategy=stage2_cfg.get("voting_strategy", "average"),
     )
     event_id = dispatcher.dispatch(
         track_id=track_id,
@@ -233,7 +236,6 @@ def _reset_tracking(
 
 def _pipeline_loop(
     detection_queue: DetectionQueue,
-    classifier: Classifier,
     zoom: AnimalZoomController,
     tracker: IouTracker,
     track_sm: TrackStateMachine,
@@ -248,8 +250,7 @@ def _pipeline_loop(
     clip_extractor: ClipExtractor | None = None,
     status: EdgeStatus | None = None,
 ) -> None:
-    cls_cfg = inf_cfg["classifier"]
-    max_crops = int(cls_cfg.get("max_crops_per_track", 5))
+    stage2_cfg = inf_cfg.get("stage2", {})
     cycles = 0
     while not stop_event.is_set():
         if status is not None:
@@ -272,10 +273,9 @@ def _pipeline_loop(
             # Zoomed re-detection found nothing: alert with the wide-view
             # evidence captured when the zoom started.
             snapshot = expired.wide_frame if expired.wide_frame is not None else batch.frame
-            result, event_id = _classify_and_dispatch(
-                classifier,
-                cls_cfg,
-                expired.wide_crops,
+            result, event_id = _verify_and_dispatch(
+                expired.wide_votes,
+                stage2_cfg,
                 snapshot,
                 expired.track_id,
                 dispatcher,
@@ -338,17 +338,16 @@ def _pipeline_loop(
                         track.class_name,
                         track.box,
                         magnification,
-                        wide_crops=snapshot_store.top(track.track_id, max_crops),
+                        wide_votes=track.class_votes,
                         wide_frame=best.full_frame if best else batch.frame,
                     )
                     engaged_this_cycle = True
-                    continue  # classified after zoom + focus
+                    continue  # species voted after zoom + focus
 
-            crops = snapshot_store.top(track.track_id, max_crops)
             best = snapshot_store.best(track.track_id)
             snapshot_image = best.full_frame if best else batch.frame
-            result, event_id = _classify_and_dispatch(
-                classifier, cls_cfg, crops, snapshot_image, track.track_id, dispatcher, view, model_version
+            result, event_id = _verify_and_dispatch(
+                track.class_votes, stage2_cfg, snapshot_image, track.track_id, dispatcher, view, model_version
             )
             track_sm.mark_classified(track.track_id, result.species, result.confidence)
             if event_id:
@@ -398,6 +397,12 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
 
     node_cfg = load(paths.NODE_CONFIG)
     rtsp_cfg = load(paths.RTSP_CONFIG)
+    # Address only (load() already validated it), never the credentials or URLs.
+    camera_host = rtsp_cfg["camera"]["host"]
+    log.info(
+        "camera host",
+        extra={"camera_host": camera_host, "camera_host_source": camera_host_source(camera_host)},
+    )
     inf_cfg = load(paths.INFERENCE_CONFIG)
     tracking_cfg = load(paths.TRACKING_CONFIG)
     zones_cfg = load(paths.DETECTION_ZONES_CONFIG)
@@ -405,9 +410,8 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
     camera_id = node_cfg.get("node", {}).get("camera_id", "cam01")
     model_version = inf_cfg.get("model_version", "unknown")
 
-    detector, classifier = build_detector_and_classifier(node_cfg, inf_cfg)
+    detector = build_detector(node_cfg, inf_cfg)
     detector.warmup()
-    classifier.warmup()
 
     frame_slot = LatestFrameSlot()
 
@@ -428,7 +432,9 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
     lens_camera.trigger_autofocus()
 
     tracker = IouTracker.from_config(
-        tracking_cfg, presence_window=int(inf_cfg["detector"].get("window_size", 5))
+        tracking_cfg,
+        presence_window=int(inf_cfg["detector"].get("window_size", 5)),
+        max_class_votes=int(inf_cfg.get("stage2", {}).get("max_frames_per_track", 10)),
     )
     stage1 = Stage1Gate(Stage1Config.from_config(inf_cfg))
     track_sm = TrackStateMachine(stage1)
@@ -475,7 +481,6 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
             "pipeline",
             lambda: _pipeline_loop(
                 detection_queue,
-                classifier,
                 zoom,
                 tracker,
                 track_sm,
@@ -515,7 +520,6 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
             # down and a half-written MP4 is worse than none.
             clip_extractor.flush_all()
             detector.close()
-            classifier.close()
         # On escalation a hung worker may hold the NPU or a camera socket;
         # closing those could hang too, so they are left to process exit.
         if zoom.state != ZoomState.WIDE:

@@ -191,6 +191,11 @@ def evaluate_edge_health(status: dict | None, now: float, stale_after_sec: float
         else:
             tracker = "ok" if fresh("pipeline_loop_ts") else "frozen"
 
+        # Two sources, kept separate on purpose: last_frame_ts is the inference
+        # loop's latest frame, judged now against stale_after_sec (the file is
+        # rewritten only every few seconds); stream.is_stalled is the capture
+        # thread's own verdict (rtsp_config reconnect.stall_timeout_sec, 5 s)
+        # at the time the file was written.
         if status.get("last_frame_ts") is None:
             camera = "no_frames"
         elif fresh("last_frame_ts") and not (status.get("stream") or {}).get("is_stalled"):

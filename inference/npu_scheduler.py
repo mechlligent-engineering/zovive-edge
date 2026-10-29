@@ -1,10 +1,10 @@
 """Serializes access to the Hailo-8 device.
 
-The Hailo M.2 HAT is a single shared NPU: the detector (continuous,
-every patrol frame) and the classifier (bursty, on-trigger) must not
-issue InferVStreams calls concurrently from different threads. This
-is the only thing in inference/ that hailo_inference.py's Detector
-and Classifier both go through, so it's the one place that lock lives.
+The Hailo M.2 HAT is a single shared NPU. The node runs one model on it
+(the species detector, every frame), but InferVStreams calls must still
+never overlap from different threads (e.g. the inference thread and a
+benchmark or SAHI tile pass). Every hailo_inference.py call goes through
+this lock.
 
 Also tracks basic latency stats for the health heartbeat.
 """
@@ -68,7 +68,7 @@ class NpuScheduler:
             }
 
 
-# Process-wide singleton: both HailoDetector and HailoClassifier import
-# and share this so they queue behind the same lock rather than each
-# opening their own device handle.
+# Process-wide singleton: every HailoDetector imports and shares this so
+# all calls queue behind the same lock rather than each opening their own
+# device handle.
 default_scheduler = NpuScheduler()

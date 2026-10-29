@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS events (
     model_version   TEXT,
     preset_name     TEXT,
     priority        TEXT NOT NULL DEFAULT 'normal',   -- normal | high
-    status          TEXT NOT NULL DEFAULT 'pending',  -- pending | sent | failed  (image alert)
+    status          TEXT NOT NULL DEFAULT 'pending',  -- pending | failed | sent | dead  (image alert)
     attempt_count   INTEGER NOT NULL DEFAULT 0,
     last_attempt_ts REAL,
     error_message   TEXT,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS events (
     -- separately from status so a slow/failed video upload never blocks
     -- or gets confused with the (already-sent) image alert.
     video_path          TEXT,
-    video_status         TEXT NOT NULL DEFAULT 'none',  -- none | pending | sent | failed
+    video_status         TEXT NOT NULL DEFAULT 'none',  -- none | pending | failed | sent | dead
     video_attempt_count  INTEGER NOT NULL DEFAULT 0,
     video_last_attempt_ts REAL,
     video_error_message  TEXT,
@@ -47,7 +47,27 @@ CREATE TABLE IF NOT EXISTS events (
     -- This row itself is never deleted either way — it's the permanent
     -- local *metadata* record, only the heavy binary files get purged.
     snapshot_deleted_ts REAL,
-    video_deleted_ts     REAL
+    video_deleted_ts     REAL,
+    -- Per-artifact proof of receipt (storage/retention_manager.py deletes
+    -- only media whose own column is set). Written in the same UPDATE that
+    -- marks the artifact sent, and only when a real base station answered
+    -- 2xx, without a redirect, to a request that carried the complete file
+    -- (transfer_main.py). NULL = no proof: a metadata-only send, the
+    -- NullBaseStationClient, or a row sent before this column existed.
+    snapshot_acked_ts   REAL,
+    video_acked_ts      REAL,
+    -- Upload retry queue, one pair per artifact (transfer_main.py,
+    -- network/retry_policy.py). A sender claims due rows by moving
+    -- *next_retry_ts forward by a lease and stamping *send_claim; only that
+    -- claim may record the result, and an expired lease makes the row due
+    -- again. NULL next_retry_ts = due now. 'dead' (status/video_status):
+    -- retries exhausted after HTTP 4xx rejections or an unrecoverable local
+    -- problem; never retried automatically (transfer_main.py --requeue-dead).
+    -- attempt_count/video_attempt_count count only those rejections.
+    next_retry_ts       REAL,
+    send_claim          TEXT,
+    video_next_retry_ts REAL,
+    video_send_claim    TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
@@ -76,4 +96,7 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', '3');
+INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', '5');
+-- Indexes on columns added by a migration live in db/migrations.py
+-- (POST_MIGRATION_INDEXES): this file also runs against an existing,
+-- older database before migrate() has added those columns.

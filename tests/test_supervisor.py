@@ -26,7 +26,7 @@ from pipeline.zone_filter import ZoneFilter
 from queues.alert_queue import AlertQueue
 from queues.detection_queue import DetectionBatch, DetectionQueue
 from storage.evidence_store import EvidenceStore
-from tests.helpers import AlwaysClassifier, blank_frame, camera_credentials
+from tests.helpers import blank_frame, camera_credentials
 from watchdog import sd_notify
 from watchdog.edge_status import EdgeStatus, evaluate_edge_health, read_status_file
 from watchdog.restart_history import UNCLEAN_EXIT, record_exit, record_start
@@ -347,7 +347,6 @@ class TestPipelineCrashRecovery(unittest.TestCase):
                 "pipeline",
                 lambda: edge_main._pipeline_loop(
                     queue,
-                    AlwaysClassifier("tiger", 0.92),
                     zoom,
                     tracker,
                     track_sm,
@@ -355,7 +354,7 @@ class TestPipelineCrashRecovery(unittest.TestCase):
                     MotionGate(),
                     snapshot_store,
                     dispatcher,
-                    {"classifier": {"max_crops_per_track": 5, "min_confidence": 0.5}},
+                    {"stage2": {"min_confidence": 0.5}},
                     "test-v1",
                     stop,
                     3,

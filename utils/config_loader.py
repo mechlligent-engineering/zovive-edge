@@ -52,7 +52,7 @@ from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Generic, TypeVar
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -129,17 +129,28 @@ def _freeze(value: Any) -> Any:
 
 
 def redact_url(url: str) -> str:
-    """Replace the password in a URL with ``***`` so it is safe to log."""
+    """``url`` with its whole ``user:password@`` part shown as ``***@`` so it
+    is safe to log (see ``_url_for_error()``)."""
     try:
-        parts = urlsplit(url)
+        urlsplit(url)
     except ValueError:
         return "<unparseable url>"
-    if parts.password is None:
+    return _url_for_error(url)
+
+
+_URL_SCHEME_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*")
+
+
+def _url_for_error(url: str) -> str:
+    """``url`` with everything before its last ``@`` shown as ``***``: the
+    username and password, even when a raw ``/``, ``?`` or ``#`` in one of
+    them has cut the ``user:password@`` part short and ``urlsplit()`` no
+    longer finds it. A URL without ``@`` is returned unchanged."""
+    head, at, tail = url.rpartition("@")
+    if not at:
         return url
-    netloc = f"{parts.username or ''}:***@{parts.hostname or ''}"
-    if parts.port is not None:
-        netloc += f":{parts.port}"
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    scheme, sep, _ = head.partition("://")
+    return f"{scheme}://***@{tail}" if sep and _URL_SCHEME_RE.fullmatch(scheme) else f"***@{tail}"
 
 
 _HOSTNAME_RE = re.compile(
@@ -154,6 +165,90 @@ def is_valid_host(host: str) -> bool:
         return True
     except ValueError:
         return bool(_HOSTNAME_RE.match(host))
+
+
+# --- Camera address ----------------------------------------------------------
+
+CAMERA_HOST_ENV = "ZOVIVE_CAMERA_HOST"
+
+
+def camera_host_problem(host: str) -> str | None:
+    """Why ``host`` cannot be the camera address, or None if it can.
+
+    Accepts an IPv4 address or an RFC 1123 hostname, exactly as given (no
+    trimming). IPv6 is rejected for now: the RTSP URL templates in
+    rtsp_config.yaml don't bracket it and ONVIF over IPv6 is unverified.
+    """
+    if not host.strip():
+        return "is empty"
+    if any(c.isspace() for c in host):
+        return "contains whitespace"
+    if "/" in host or "@" in host:
+        return "is a URL; give only the IPv4 address or hostname"
+    try:
+        version = ipaddress.ip_address(host).version
+    except ValueError:
+        version = None
+    if version == 4:
+        return None
+    if version == 6 or (host.startswith("[") and ":" in host):
+        return "is an IPv6 address; only IPv4 addresses and hostnames are supported"
+    if ":" in host:
+        return "includes a port; give only the IPv4 address or hostname"
+    if host.rstrip(".").rsplit(".", 1)[-1].isdigit():
+        return "is not a valid IPv4 address"
+    if not _HOSTNAME_RE.match(host):
+        return "is not a valid IPv4 address or hostname"
+    return None
+
+
+def _shown_host(host: str) -> str:
+    """``host`` quoted for an error message, with any URL credentials masked."""
+    return repr(f"***@{host.rsplit('@', 1)[1]}" if "@" in host else host)
+
+
+# A raw '/', '?' or '#' ends the user:password part of a URL early (RFC 3986
+# section 3.2), and configs/camera.yaml pastes the camera credentials into
+# rtsp_url as they are. Both that check and load()'s check of
+# rtsp_config.yaml refuse them, so `python -m utils.config_loader` and the
+# service agree.
+_URL_BREAKING_CHARS = "/?#"
+_CREDENTIALS_HINT = (
+    "camera credentials (ZOVIVE_CAMERA_USERNAME, ZOVIVE_CAMERA_PASSWORD) may not contain '/', '?' or '#'"
+)
+
+
+def rtsp_url_problem(url: str) -> str | None:
+    """Why ``url`` cannot be the camera stream URL, or None if it can.
+
+    Never quotes the credentials: no urllib exception text, the URL only with
+    its ``user:password@`` part masked, and the host only once the URL is known
+    not to be cut short (otherwise the "host" is really the username).
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "is not a valid URL"
+    if parts.scheme not in ("rtsp", "rtsps"):
+        return f"must start with rtsp:// or rtsps://, got {_url_for_error(url)!r}"
+    if "@" in parts.path + parts.query + parts.fragment:
+        return f"has an '@' after the host, so the user:password part is cut short; {_CREDENTIALS_HINT}"
+    if not parts.hostname:
+        return f"has no host: {_url_for_error(url)!r}"
+    try:
+        parts.port  # noqa: B018 - raises ValueError for a non-numeric or out-of-range port
+    except ValueError:
+        return "has a port that is not a number from 0 to 65535"
+    # Same rule load() applies to rtsp_config.yaml's camera.host.
+    problem = camera_host_problem(parts.hostname)
+    return f"host {_shown_host(parts.hostname)} {problem}" if problem else None
+
+
+def camera_host_source(host: str, env: Mapping[str, str] | None = None) -> str:
+    """Where the effective camera host came from: ``CAMERA_HOST_ENV`` when the
+    environment supplied it, otherwise ``"config default"``."""
+    env = os.environ if env is None else env
+    return CAMERA_HOST_ENV if env.get(CAMERA_HOST_ENV) == host else "config default"
 
 
 # --- ${VAR} / ${VAR:-default} interpolation -------------------------------
@@ -294,13 +389,86 @@ def read_yaml_file(
 _file_cache: dict[Path, dict[str, Any]] = {}
 
 
+def _check_rtsp_camera(data: Mapping[str, Any], source: str, env: Mapping[str, str]) -> list[ConfigIssue]:
+    """camera.host must be a usable address and the camera credentials must
+    fit in an RTSP URL. Without this an empty or malformed ZOVIVE_CAMERA_HOST,
+    or a '/', '?' or '#' in a credential, builds an RTSP URL with no valid
+    host and the reader retries it forever instead of refusing to start."""
+    cam = data.get("camera")
+    if cam is None:
+        return [ConfigIssue(source, "camera", "required section is missing", IssueKind.MISSING_KEY)]
+    if not isinstance(cam, Mapping):
+        return [
+            ConfigIssue(
+                source, "camera", f"expected a mapping, got {type(cam).__name__}", IssueKind.INVALID_TYPE
+            )
+        ]
+    return _camera_host_issues(cam, source, env) + _camera_credential_issues(cam, source)
+
+
+def _camera_credential_issues(cam: Mapping[str, Any], source: str) -> list[ConfigIssue]:
+    """Names the credential and its variable, never its value."""
+    issues = []
+    for key, var in (("username", "ZOVIVE_CAMERA_USERNAME"), ("password", "ZOVIVE_CAMERA_PASSWORD")):
+        value = cam.get(key)
+        if isinstance(value, str) and any(c in value for c in _URL_BREAKING_CHARS):
+            issues.append(
+                ConfigIssue(
+                    source,
+                    f"camera.{key}",
+                    f"(from {var}) contains '/', '?' or '#', which cut the RTSP URL's user:password part"
+                    f" short; {_CREDENTIALS_HINT}",
+                    IssueKind.INVALID_VALUE,
+                )
+            )
+    return issues
+
+
+def _camera_host_issues(cam: Mapping[str, Any], source: str, env: Mapping[str, str]) -> list[ConfigIssue]:
+    host = cam.get("host")
+    if host is None:
+        return [ConfigIssue(source, "camera.host", "required value is missing", IssueKind.MISSING_KEY)]
+    if not isinstance(host, str):
+        return [
+            ConfigIssue(
+                source,
+                "camera.host",
+                f"expected a string (wrap it in quotes), got {type(host).__name__}",
+                IssueKind.INVALID_TYPE,
+            )
+        ]
+    problem = camera_host_problem(host)
+    if problem is None:
+        return []
+    if camera_host_source(host, env) == CAMERA_HOST_ENV:
+        where = f"from {CAMERA_HOST_ENV}"
+        fix = f"set {CAMERA_HOST_ENV} to the camera's IPv4 address or hostname, or unset it to use the default in {source}"
+    else:
+        where = f"the default in {source}"
+        fix = f"fix the default in {source}, or set {CAMERA_HOST_ENV}"
+    return [
+        ConfigIssue(
+            source, "camera.host", f"{_shown_host(host)} ({where}) {problem}; {fix}", IssueKind.INVALID_VALUE
+        )
+    ]
+
+
+# Checks load() runs on a file's interpolated data, keyed by file name. Their
+# issues are reported together with any missing environment variables.
+_RUNTIME_CHECKS: dict[str, Callable[[Mapping[str, Any], str, Mapping[str, str]], list[ConfigIssue]]] = {
+    "rtsp_config.yaml": _check_rtsp_camera,
+}
+
+
 def load(path: str | Path, required: bool = True) -> dict[str, Any]:
     """Load one YAML config file as a dict, with ``${VAR}`` interpolation.
 
     Cached by resolved path; ``clear_cache()`` resets it (tests). Raises
-    ``ConfigError`` listing every problem: missing/malformed file, and every
-    ``${VAR}`` without a default whose variable is unset or empty. A missing
-    file with ``required=False`` loads as ``{}``.
+    ``ConfigError`` listing every problem: missing/malformed file, every
+    ``${VAR}`` without a default whose variable is unset or empty, and
+    anything the file's ``_RUNTIME_CHECKS`` entry rejects (rtsp_config.yaml:
+    camera.host and the camera credentials). A failed load is not cached. A
+    missing file with ``required=False`` loads as ``{}``.
     """
     p = Path(path).resolve()
     if p in _file_cache:
@@ -313,10 +481,10 @@ def load(path: str | Path, required: bool = True) -> dict[str, Any]:
     if data is None:
         raise ConfigError(issues)
 
-    missing: list[ConfigIssue] = []
+    problems: list[ConfigIssue] = []
 
     def on_missing_env(key: str, var: str) -> None:
-        missing.append(
+        problems.append(
             ConfigIssue(
                 p.name,
                 key,
@@ -326,8 +494,11 @@ def load(path: str | Path, required: bool = True) -> dict[str, Any]:
         )
 
     data = _interpolate(data, os.environ, "", on_missing_env)
-    if missing:
-        raise ConfigError(missing)
+    check = _RUNTIME_CHECKS.get(p.name)
+    if check is not None:
+        problems.extend(check(data, p.name, os.environ))
+    if problems:
+        raise ConfigError(problems)
     _file_cache[p] = data
     return data
 
@@ -766,17 +937,9 @@ class CameraConfig:
 
 def parse_camera(r: ConfigReader, ctx: ParseContext) -> CameraConfig:
     rtsp_url = r.string("rtsp_url")
-    if rtsp_url:
-        try:
-            parts = urlsplit(rtsp_url)
-            if parts.scheme not in ("rtsp", "rtsps"):
-                r.error("rtsp_url", f"must start with rtsp:// or rtsps://, got {redact_url(rtsp_url)!r}")
-            elif not parts.hostname:
-                r.error("rtsp_url", f"has no host: {redact_url(rtsp_url)!r}")
-            else:
-                parts.port  # noqa: B018 - raises ValueError for a non-numeric port
-        except ValueError as exc:
-            r.error("rtsp_url", f"is not a valid URL ({exc})")
+    url_problem = rtsp_url_problem(rtsp_url) if rtsp_url else None
+    if url_problem:
+        r.error("rtsp_url", url_problem)
 
     res = r.section("resolution")
     rc = r.section("reconnect", required=False)
@@ -793,8 +956,9 @@ def parse_camera(r: ConfigReader, ctx: ParseContext) -> CameraConfig:
     pz = r.section("ptz", required=False)
     ptz_enabled = pz.boolean("enabled", False)
     ptz_host = pz.string("host", None)
-    if ptz_host and not is_valid_host(ptz_host):
-        pz.error("host", f"is not a valid IP address or hostname: {ptz_host!r}")
+    ptz_host_problem = camera_host_problem(ptz_host) if ptz_host else None
+    if ptz_host_problem:
+        pz.error("host", f"{_shown_host(ptz_host)} {ptz_host_problem}")
     if ptz_enabled and not ptz_host:
         pz.error("host", "is required when ptz.enabled is true", IssueKind.MISSING_KEY)
     protocols = [p.value for p in PtzProtocol]

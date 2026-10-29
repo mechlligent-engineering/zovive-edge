@@ -50,6 +50,10 @@ class Track:
     last_seen_ts: float = field(default_factory=time.time)
     # last N (is_animal_present) votes for stage1_gate's 3-of-5 rule
     presence_history: list[bool] = field(default_factory=list)
+    # last N (class_name, score) of the detections matched to this track,
+    # newest last: what pipeline/stage2_verifier.py votes the species from.
+    # Matching is by box overlap only, so the per-frame class can differ.
+    class_votes: list[tuple[str, float]] = field(default_factory=list)
     confirmed: bool = False
 
 
@@ -60,11 +64,13 @@ class IouTracker:
         max_age_frames: int = 15,
         min_hits_to_confirm: int = 2,
         presence_window: int = 5,
+        max_class_votes: int = 10,
     ):
         self.iou_match_threshold = iou_match_threshold
         self.max_age_frames = max_age_frames
         self.min_hits_to_confirm = min_hits_to_confirm
         self.presence_window = presence_window
+        self.max_class_votes = max_class_votes
         self._tracks: dict[str, Track] = {}
         self._id_counter = itertools.count(1)
 
@@ -102,6 +108,8 @@ class IouTracker:
             track.last_seen_ts = now
             track.presence_history.append(True)
             track.presence_history = track.presence_history[-self.presence_window :]
+            track.class_votes.append((det.class_name, det.score))
+            track.class_votes = track.class_votes[-self.max_class_votes :]
             if track.hits >= self.min_hits_to_confirm:
                 track.confirmed = True
             matched_track_ids.add(tid)
@@ -121,6 +129,7 @@ class IouTracker:
                 class_name=det.class_name,
                 score=det.score,
                 presence_history=[True],
+                class_votes=[(det.class_name, det.score)],
             )
             newly_created_ids.add(tid)
 
@@ -156,11 +165,12 @@ class IouTracker:
         return list(self._tracks.values())
 
     @classmethod
-    def from_config(cls, cfg: dict, presence_window: int = 5) -> IouTracker:
+    def from_config(cls, cfg: dict, presence_window: int = 5, max_class_votes: int = 10) -> IouTracker:
         t = cfg.get("tracker", {})
         return cls(
             iou_match_threshold=float(t.get("iou_match_threshold", 0.3)),
             max_age_frames=int(t.get("max_age_frames", 15)),
             min_hits_to_confirm=int(t.get("min_hits_to_confirm", 2)),
             presence_window=presence_window,
+            max_class_votes=max_class_votes,
         )

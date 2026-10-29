@@ -60,14 +60,27 @@ class RuntimeLoadTests(unittest.TestCase):
             load(paths.RTSP_CONFIG)
         err = ctx.exception
         self.assertEqual(err.kinds(), {IssueKind.MISSING_ENV})
-        self.assertEqual({i.key for i in err.issues}, {"camera.username", "camera.password"})
+        self.assertEqual(
+            {i.key for i in err.issues},
+            {
+                "camera.username",
+                "camera.password",
+                "camera.onvif_username",
+                "camera.onvif_password",
+            },
+        )
         for var in CAMERA_VARS:
             self.assertIn(var, str(err))
 
     def test_empty_password_counts_as_missing(self):
         # nosec B106: the empty string IS the case under test (a blank
         # password must be rejected); it is not a hardcoded credential.
-        with without_camera_credentials(ZOVIVE_CAMERA_USERNAME="u", ZOVIVE_CAMERA_PASSWORD=""):  # nosec B106
+        with without_camera_credentials(
+            ZOVIVE_CAMERA_USERNAME="u",
+            ZOVIVE_CAMERA_PASSWORD="",
+            ZOVIVE_ONVIF_USERNAME="test-onvif-user",
+            ZOVIVE_ONVIF_PASSWORD="test-onvif-pass",
+        ):  # nosec B106
             with self.assertRaises(ConfigError) as ctx:
                 load(paths.RTSP_CONFIG)
         self.assertEqual([i.key for i in ctx.exception.issues], ["camera.password"])
@@ -132,7 +145,7 @@ class EdgeMainStartupTests(unittest.TestCase):
             without_camera_credentials(),
             mock.patch.object(edge_main, "init_db"),
             mock.patch.object(edge_main, "migrate"),
-            mock.patch.object(edge_main, "build_detector_and_classifier", build),
+            mock.patch.object(edge_main, "build_detector", build),
             self.assertRaises(ConfigError) as ctx,
         ):
             edge_main._run({}, None, None)

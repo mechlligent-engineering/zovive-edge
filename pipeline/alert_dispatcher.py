@@ -1,11 +1,17 @@
-"""Turns a CLASSIFIED track into a durable event: writes it to the
-SQLite outbox FIRST (so it's never lost even if everything after this
-crashes), saves the snapshot, then hands a lightweight payload to the
-in-memory alert_queue for transfer_main.py to pick up promptly.
+"""Turns a CLASSIFIED track into a durable event: saves the snapshot
+FIRST (storage/evidence_store.py), then writes the event to the SQLite
+outbox with the snapshot's final path, then hands a lightweight payload
+to the in-memory alert_queue for transfer_main.py to pick up promptly.
 
-This ordering (DB row before in-memory queue push) is what makes the
-alert_queue drop-oldest policy (queues/alert_queue.py) safe: a drop
-just means the sender learns about it a little later, by polling
+Snapshot before DB row: an outbox row never claims evidence that does
+not exist. If the snapshot cannot be saved, dispatch() raises with no
+row written and nothing queued (edge_main's supervisor restarts the
+pipeline thread). A crash between the save and the insert leaves at
+most a snapshot no row refers to, never a row without its snapshot.
+
+DB row before in-memory queue push: this is what makes the alert_queue
+drop-oldest policy (queues/alert_queue.py) safe: a drop just means the
+sender learns about it a little later, by polling
 db.outbox.get_pending(), rather than losing it.
 """
 

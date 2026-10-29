@@ -3,7 +3,7 @@ store-and-forward outbox: an event gets its video_path set once
 pipeline/clip_extractor.py finishes a clip (independently of whether
 its image alert already sent), transfer_main.py's video-send loop
 picks it up, and a failed upload is retried without touching the
-image alert's own status/backoff at all.
+image alert's own status/retry state at all.
 """
 
 from __future__ import annotations
@@ -16,15 +16,17 @@ import paths
 from db.init_db import init_db
 from db.outbox import (
     EventRecord,
+    claim_due,
+    get_event,
     get_pending_videos,
     insert_event,
     mark_sent,
-    mark_video_failed,
     mark_video_sent,
+    record_send_failure,
     set_video_path,
 )
 from network.base_station_client import BaseStationError
-from network.transfer_state import TransferState
+from network.retry_policy import RetryPolicy
 from transfer_main import _send_pending_videos
 
 
@@ -89,13 +91,20 @@ class TestVideoOutboxHelpers(unittest.TestCase):
         mark_video_sent(self.event_id)
         self.assertEqual(get_pending_videos(), [])
 
-    def test_mark_video_failed_keeps_it_out_of_pending_until_reset(self):
+    def test_failed_video_waits_for_its_retry_time_without_touching_the_image_alert(self):
         set_video_path(self.event_id, str(self.video_path))
-        mark_video_failed(self.event_id, "connection refused")
-        # video_status is now 'failed', not 'pending' -> not returned by
-        # get_pending_videos() until something resets it, mirroring the
-        # image alert's failed/pending split.
+        claim, rows = claim_due(
+            "video", now=1000.0, limit=10, lease_sec=150.0, max_retries=5, max_wait_sec=1e6
+        )
+        self.assertEqual([r["event_id"] for r in rows], [self.event_id])
+        record_send_failure(
+            "video", self.event_id, claim, now=1000.0, error="HTTP 500", retry_at=1060.0, charged=False
+        )
+        row = get_event(self.event_id)
+        self.assertEqual((row["video_status"], row["status"]), ("failed", "pending"))
         self.assertEqual(get_pending_videos(), [])
+        due = claim_due("video", now=1060.0, limit=10, lease_sec=150.0, max_retries=5, max_wait_sec=1e6)[1]
+        self.assertEqual([r["event_id"] for r in due], [self.event_id])
 
 
 class TestSendPendingVideosLoop(unittest.TestCase):
@@ -124,42 +133,41 @@ class TestSendPendingVideosLoop(unittest.TestCase):
 
     def test_successful_upload_marks_sent(self):
         client = _FakeClient(fail_first_n=0)
-        state = TransferState()
 
-        _send_pending_videos(client, state, batch_size=10, timeout_sec=30.0)
+        _send_pending_videos(client, RetryPolicy(), batch_size=10, timeout_sec=30.0)
 
         self.assertEqual(client.calls, [(self.event_id, 10)])
         self.assertEqual(get_pending_videos(), [])
 
-    def test_missing_video_file_marks_failed_permanently_without_retry(self):
+    def test_missing_video_file_is_dead_lettered_without_retry(self):
         self.video_path.unlink()  # simulate disk cleanup / lost clip
         client = _FakeClient()
-        state = TransferState()
 
-        _send_pending_videos(client, state, batch_size=10, timeout_sec=30.0)
+        _send_pending_videos(client, RetryPolicy(), batch_size=10, timeout_sec=30.0)
 
         self.assertEqual(client.calls, [], "should never call send_video for a missing file")
-        self.assertEqual(get_pending_videos(), [])
+        self.assertEqual(get_event(self.event_id)["video_status"], "dead")
 
-    def test_failed_upload_is_retried_after_backoff(self):
+    def test_failed_upload_is_retried_after_the_pause(self):
+        # A plain BaseStationError is a busy base station: no retry is used up,
+        # the video queue waits ~60 s (jitter 0 here) and then tries again.
         client = _FakeClient(fail_first_n=1)
-        state = TransferState(
-            initial_backoff_sec=100.0
-        )  # long backoff so the 2nd call below is deterministic
+        policy = RetryPolicy(jitter=0.0)
+        now = [1000.0]
 
-        _send_pending_videos(client, state, batch_size=10, timeout_sec=30.0)
+        _send_pending_videos(client, policy, batch_size=10, timeout_sec=30.0, clock=lambda: now[0])
         self.assertEqual(len(client.calls), 1)
-        # video_status is 'failed' now, so it's not in get_pending_videos()
-        # until something resets it back to pending (same as image alerts).
-        self.assertEqual(get_pending_videos(), [])
+        self.assertEqual(get_pending_videos(), [], "video_status is 'failed' until it is sent")
 
-        # Simulate an operator/retry mechanism resetting it, then confirm
-        # backoff (not yet elapsed) holds it back from a second attempt.
-        from db.outbox import reset_video_to_pending
+        now[0] = 1030.0
+        _send_pending_videos(client, policy, batch_size=10, timeout_sec=30.0, clock=lambda: now[0])
+        self.assertEqual(len(client.calls), 1, "the pause holds back an immediate retry")
 
-        reset_video_to_pending(self.event_id)
-        _send_pending_videos(client, state, batch_size=10, timeout_sec=30.0)
-        self.assertEqual(len(client.calls), 1, "backoff should have prevented an immediate retry")
+        now[0] = 1061.0
+        _send_pending_videos(client, policy, batch_size=10, timeout_sec=30.0, clock=lambda: now[0])
+        self.assertEqual(len(client.calls), 2)
+        row = get_event(self.event_id)
+        self.assertEqual((row["video_status"], row["video_attempt_count"]), ("sent", 0))
 
 
 if __name__ == "__main__":

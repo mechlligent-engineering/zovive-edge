@@ -50,6 +50,15 @@ MODELS_DIR = PROJECT_ROOT / "models"
 MODELS_BACKUP_DIR = MODELS_DIR / "backup"
 MODEL_MANIFEST = MODELS_DIR / "manifest.json"
 
+
+def model_file(path: str | Path) -> Path:
+    """Where a model named in inference_config.yaml lives: a relative path
+    is taken under MODELS_DIR (never the working directory, which differs
+    between systemd, tools and tests); an absolute path is kept as is."""
+    p = Path(path).expanduser()
+    return p if p.is_absolute() else MODELS_DIR / p
+
+
 # --- Runtime data (under DATA_ROOT so it's easy to point at a big disk) --
 
 DB_DIR = DATA_ROOT / "db"
@@ -63,6 +72,11 @@ EDGE_STATUS_PATH = DATA_ROOT / "edge_status.json"
 # edge_main.py process starts and why the previous run ended
 # (watchdog/restart_history.py); survives systemd restarts.
 RESTART_HISTORY_PATH = DATA_ROOT / "restart_history.json"
+# storage/retention_manager.py: last cleanup summaries + unACKed backlog,
+# read by health_main.py for the heartbeat; and the lock that stops two
+# cleanup runs (daily, storage pressure) from overlapping.
+RETENTION_STATUS_PATH = DATA_ROOT / "retention_status.json"
+RETENTION_LOCK_PATH = DATA_ROOT / "retention.lock"
 LOG_DIR = DATA_ROOT / "logs"
 CACHE_DIR = DATA_ROOT / "cache"
 QUARANTINE_DIR = DATA_ROOT / "quarantine"  # files that failed validation

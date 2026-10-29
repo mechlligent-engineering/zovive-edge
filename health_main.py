@@ -35,7 +35,9 @@ import paths
 from db.init_db import init_db
 from logger_setup import configure_root, get_logger
 from network.base_station_client import BaseStationError, build_client
+from network.heartbeat import build_heartbeat_payload
 from utils.config_loader import load
+from utils.thermal_monitor import read_soc_temp_c
 from watchdog.edge_status import evaluate_edge_health, read_status_file
 
 log = get_logger(__name__)
@@ -52,6 +54,9 @@ SEND_FAILURE_LOG_EVERY = 20
 # can substitute a different program. Pi OS ships it in /usr/bin.
 _VCGENCMD_CANDIDATES = ("/usr/bin/vcgencmd", "/opt/vc/bin/vcgencmd")
 _VCGENCMD_TIMEOUT_SEC = 2.0
+
+# Linux: "<seconds since boot> <idle seconds>".
+_PROC_UPTIME = "/proc/uptime"
 
 # `vcgencmd get_throttled` bit meanings (Raspberry Pi firmware documentation).
 _THROTTLE_BITS = {
@@ -133,21 +138,41 @@ def _disk_usage(path) -> dict | None:
     }
 
 
+def _system_uptime_sec() -> int | None:
+    """Seconds since the Pi booted; None where /proc/uptime doesn't exist (Windows)."""
+    try:
+        with open(_PROC_UPTIME, encoding="ascii") as f:
+            return int(float(f.read().split()[0]))
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 def collect_heartbeat(camera_id: str, stale_after_sec: float = 30.0, now: float | None = None) -> dict:
     now = now if now is not None else time.time()
     edge_raw = read_status_file(paths.EDGE_STATUS_PATH)
     throttle = _pi_throttle_status()
-    return {
+    disk = _disk_usage(paths.DATA_ROOT)
+    edge = evaluate_edge_health(edge_raw, now, stale_after_sec)
+    payload = {
         "camera_id": camera_id,
         "ts": now,
         # Detection process's queue stats (this process has none of its own).
         "queues": (edge_raw or {}).get("queues", {}),
-        "disk": _disk_usage(paths.DATA_ROOT),
+        "disk": disk,
         # Raw string kept under its original key for existing consumers.
         "throttled": throttle["raw"],
         "throttle": {"flags": throttle["flags"], "error": throttle["error"]},
-        "edge": evaluate_edge_health(edge_raw, now, stale_after_sec),
+        "edge": edge,
+        # Last cleanup runs and the unACKed evidence backlog, written by
+        # storage/retention_manager.py; None until its first run.
+        "retention": read_status_file(paths.RETENTION_STATUS_PATH),
     }
+    # Standard summary fields (network/heartbeat.py), built from the readings
+    # above. Additive: every key above keeps its name and value.
+    payload.update(
+        build_heartbeat_payload(edge, disk, uptime_sec=_system_uptime_sec(), temperature_c=read_soc_temp_c())
+    )
+    return payload
 
 
 def _store_heartbeat(conn: sqlite3.Connection, camera_id: str, payload: dict) -> bool:

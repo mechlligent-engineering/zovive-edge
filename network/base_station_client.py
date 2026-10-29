@@ -9,7 +9,8 @@ Store-and-forward is what makes this safe to be simple: db/outbox.py
 already persisted the event before this is ever called, so a failed
 POST here just means transfer_main.py's retry loop tries again later;
 this client doesn't need its own queueing or retry state beyond
-raising on failure.
+raising on failure, with the kind of failure in the exception type
+(network/retry_policy.py decides what each kind costs).
 """
 
 from __future__ import annotations
@@ -22,7 +23,23 @@ log = logging.getLogger(__name__)
 
 
 class BaseStationError(RuntimeError):
-    pass
+    """A failed request. A plain instance means the Base Station is busy or
+    flaky (HTTP 5xx, 429, 3xx, read timeout): worth retrying the same request
+    later. ``retry_after``: seconds from a 429/503 Retry-After header."""
+
+    def __init__(self, message: str, *, status_code: int | None = None, retry_after: float | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after = retry_after
+
+
+class BaseStationUnreachable(BaseStationError):
+    """No answer at all: DNS failure, connection refused, connect timeout, TLS."""
+
+
+class BaseStationRejected(BaseStationError):
+    """The Base Station refused this request (HTTP 4xx other than 429);
+    sending it again unchanged is expected to fail again."""
 
 
 class BaseStationClient:
@@ -56,14 +73,20 @@ class BaseStationClient:
                     headers={"Authorization": self._headers().get("Authorization", "")},
                     timeout=self.timeout_sec,
                     verify=self.verify,
+                    allow_redirects=False,
                 )
             else:
                 resp = requests.post(
-                    url, json=event, headers=self._headers(), timeout=self.timeout_sec, verify=self.verify
+                    url,
+                    json=event,
+                    headers=self._headers(),
+                    timeout=self.timeout_sec,
+                    verify=self.verify,
+                    allow_redirects=False,
                 )
-            resp.raise_for_status()
         except requests.RequestException as exc:
-            raise BaseStationError(f"send_event failed: {exc}") from exc
+            raise _request_error("send_event", exc) from exc
+        _require_2xx(resp, "send_event")
 
     def send_video(self, event_id: str, video_bytes: bytes, timeout_sec: float | None = None) -> None:
         """POST the event video clip (pipeline/clip_extractor.py's MP4)
@@ -85,10 +108,11 @@ class BaseStationClient:
                 headers={"Authorization": self._headers().get("Authorization", "")},
                 timeout=timeout_sec if timeout_sec is not None else self.timeout_sec,
                 verify=self.verify,
+                allow_redirects=False,
             )
-            resp.raise_for_status()
         except requests.RequestException as exc:
-            raise BaseStationError(f"send_video failed: {exc}") from exc
+            raise _request_error("send_video", exc) from exc
+        _require_2xx(resp, "send_video")
 
     def send_heartbeat(self, payload: dict) -> None:
         url = f"{self.base_url}/api/heartbeat"
@@ -99,6 +123,41 @@ class BaseStationClient:
             resp.raise_for_status()
         except requests.RequestException as exc:
             raise BaseStationError(f"send_heartbeat failed: {exc}") from exc
+
+
+def _request_error(what: str, exc: requests.RequestException) -> BaseStationError:
+    """No HTTP answer. requests' ConnectionError covers DNS failure, refused
+    and reset connections, ConnectTimeout and SSLError; anything else (e.g. a
+    read timeout after connecting) means the Base Station is there but busy."""
+    if isinstance(exc, requests.ConnectionError):
+        return BaseStationUnreachable(f"{what} failed: {exc}")
+    return BaseStationError(f"{what} failed: {exc}")
+
+
+def _require_2xx(resp: requests.Response, what: str) -> None:
+    """A media upload counts as received only on a direct 2xx answer.
+    Redirects are not followed for uploads: requests would turn a 301/302
+    into a GET without the file, and that GET's 200 must not look like an
+    ACK (storage/retention_manager.py deletes media on ACK). A 4xx other
+    than 429 is a rejection of this request; anything else is a busy Base
+    Station."""
+    code = resp.status_code
+    if 200 <= code < 300:
+        return
+    message = f"{what} failed: unexpected HTTP {code}"
+    if 300 <= code < 400:
+        message += " (redirects are not followed)"
+    if 400 <= code < 500 and code != 429:
+        raise BaseStationRejected(message, status_code=code)
+    raise BaseStationError(message, status_code=code, retry_after=_retry_after_sec(resp))
+
+
+def _retry_after_sec(resp: requests.Response) -> float | None:
+    """A Retry-After given in seconds; the HTTP-date form is ignored."""
+    try:
+        return float(resp.headers.get("Retry-After", ""))
+    except (TypeError, ValueError):
+        return None
 
 
 def _to_json(obj: dict) -> str:

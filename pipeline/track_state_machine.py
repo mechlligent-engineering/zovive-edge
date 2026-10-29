@@ -6,8 +6,8 @@ and separate from the camera's lens state machine
 States:
     NEW        -> just created by the tracker, not yet gate-passed
     CONFIRMING -> being tracked, waiting on stage1_gate's presence vote
-    CONFIRMED  -> stage1_gate passed; ready for stage2 classification
-    CLASSIFIED -> species verified (or unknown_animal); ready to alert
+    CONFIRMED  -> stage1_gate passed; ready for the stage2 species vote
+    CLASSIFIED -> species decided (or unknown_animal); ready to alert
     ALERTED    -> alert dispatched; track kept alive so it doesn't
                   immediately re-trigger, but no more work happens on it
     LOST       -> tracker dropped it (max_age_frames exceeded)

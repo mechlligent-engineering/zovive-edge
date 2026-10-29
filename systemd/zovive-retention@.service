@@ -1,0 +1,21 @@
+[Unit]
+Description=ZOVIVE media retention (%i)
+Documentation=file:/opt/zovive/storage/retention_manager.py
+After=var-lib-zovive.mount data.mount
+
+# Started only by its timers: %i = daily (zovive-retention.timer) or
+# pressure (zovive-storage-pressure.timer). Deletes only media the base
+# station ACKed; storage/retention_manager.py re-checks every file.
+[Service]
+Type=oneshot
+User=zovive
+WorkingDirectory=/opt/zovive
+EnvironmentFile=-/opt/zovive/.env
+ExecStart=/opt/zovive/.venv/bin/python -m storage.retention_manager %i
+# 75: another cleanup run held the lock or the database was unavailable;
+# try again later. 78: retention_policy.yaml is invalid; retrying won't help.
+Restart=on-failure
+RestartSec=10min
+RestartPreventExitStatus=78
+IOSchedulingClass=idle
+Nice=10

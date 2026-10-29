@@ -4,7 +4,7 @@
 alert_policy:
   # Species that should be sent with high priority (dangerous / rare).
   high_priority_species: ["tiger", "leopard", "elephant", "sloth_bear"]
-  # Send an "unknown_animal" alert even when classification confidence
-  # is below classifier.min_confidence, rather than dropping it.
+  # Send an "unknown_animal" alert even when the voted species confidence
+  # is below inference_config.yaml stage2.min_confidence, rather than dropping it.
   send_unknown_animal_alerts: true
   min_snapshot_sharpness: 40.0

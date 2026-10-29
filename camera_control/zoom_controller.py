@@ -8,8 +8,8 @@ changes the zoom and asks the lens to refocus.
     FOCUSING   : trigger_autofocus() issued. Frames are skipped for
                  `focus_settle_sec` while the lens hunts for focus.
     ZOOMED     : zoomed + focused. Frames go through the pipeline again, so
-                 the animal is re-detected and re-classified at higher
-                 resolution. The first event dispatched here completes the
+                 the animal is re-detected and its species voted again at
+                 higher resolution. The first event dispatched here completes the
                  session. If nothing confirms within `zoomed_timeout_sec`,
                  tick() hands the session back so the caller can alert with
                  the wide-view evidence instead (an animal is never dropped
@@ -60,9 +60,10 @@ class ZoomSession:
     wide_box: tuple[float, float, float, float]
     magnification: float
     started_ts: float
-    # Best wide-view material, kept for the fallback alert if the zoomed
-    # re-detection fails (the wide track itself is gone by then).
-    wide_crops: list = field(default_factory=list)
+    # Wide-view evidence, kept for the fallback alert if the zoomed
+    # re-detection fails (the wide track itself is gone by then): the
+    # track's per-frame (class_name, score) votes and its best frame.
+    wide_votes: list[tuple[str, float]] = field(default_factory=list)
     wide_frame: np.ndarray | None = None
     event_id: str | None = None
     species: str | None = None
@@ -140,7 +141,7 @@ class AnimalZoomController:
         class_name: str,
         box: tuple[float, float, float, float],
         magnification: float,
-        wide_crops: list | None = None,
+        wide_votes: list[tuple[str, float]] | None = None,
         wide_frame: np.ndarray | None = None,
         now: float | None = None,
     ) -> None:
@@ -152,7 +153,7 @@ class AnimalZoomController:
             wide_box=box,
             magnification=magnification,
             started_ts=now,
-            wide_crops=list(wide_crops or []),
+            wide_votes=list(wide_votes or []),
             wide_frame=wide_frame,
         )
         self.camera.zoom_to(level)
@@ -170,7 +171,7 @@ class AnimalZoomController:
     def tick(self, now: float | None = None) -> ZoomSession | None:
         """Call once per pipeline cycle. Returns a session only when the
         zoomed re-detection timed out; the caller should then alert using
-        `session.wide_crops` / `session.wide_frame` and call `complete()`."""
+        `session.wide_votes` / `session.wide_frame` and call `complete()`."""
         now = now if now is not None else self.clock()
 
         if self.state in (ZoomState.ZOOMING, ZoomState.RETURNING) and now >= self._deadline:

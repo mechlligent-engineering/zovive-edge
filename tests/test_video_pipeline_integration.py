@@ -27,7 +27,7 @@ from db.outbox import get_pending, get_pending_videos, set_video_path
 from edge_main import _pipeline_loop
 from inference.base import Detection
 from inference.bytetrack_wrapper import IouTracker
-from network.transfer_state import TransferState
+from network.retry_policy import RetryPolicy
 from pipeline.alert_dispatcher import AlertDispatcher
 from pipeline.best_snapshot import BestSnapshotStore
 from pipeline.clip_extractor import ClipExtractor
@@ -38,7 +38,7 @@ from pipeline.zone_filter import ZoneFilter
 from queues.alert_queue import AlertQueue
 from queues.detection_queue import DetectionBatch, DetectionQueue
 from storage.evidence_store import EvidenceStore
-from tests.helpers import AlwaysClassifier, blank_frame
+from tests.helpers import blank_frame
 from transfer_main import _send_pending_videos
 
 
@@ -75,7 +75,6 @@ class TestVideoPipelineIntegration(unittest.TestCase):
             "node": {"camera_id": "cam01", "camera_name": "Test Cam", "forest_name": "Test Forest", "gps": {}}
         }
         dispatcher = AlertDispatcher(alert_queue, evidence_store=evidence_store, node_config=node_cfg)
-        classifier = AlwaysClassifier("tiger", 0.92)
         zoom = self._build_zoom()
 
         clip_ready = threading.Event()
@@ -115,7 +114,6 @@ class TestVideoPipelineIntegration(unittest.TestCase):
         stop_event = threading.Event()
         _pipeline_loop(
             detection_queue,
-            classifier,
             zoom,
             tracker,
             track_sm,
@@ -123,9 +121,7 @@ class TestVideoPipelineIntegration(unittest.TestCase):
             motion_gate,
             snapshot_store,
             dispatcher,
-            inf_cfg={
-                "classifier": {"max_crops_per_track": 5, "min_confidence": 0.5, "voting_strategy": "average"}
-            },
+            inf_cfg={"stage2": {"min_confidence": 0.5, "voting_strategy": "average"}},
             model_version="test-v1",
             stop_event=stop_event,
             max_cycles=5,
@@ -163,7 +159,7 @@ class TestVideoPipelineIntegration(unittest.TestCase):
             def send_video(self, event_id, video_bytes, timeout_sec=None):
                 uploaded.append((event_id, len(video_bytes)))
 
-        _send_pending_videos(_FakeClient(), TransferState(), batch_size=10, timeout_sec=30.0)
+        _send_pending_videos(_FakeClient(), RetryPolicy(), batch_size=10, timeout_sec=30.0)
 
         self.assertEqual(len(uploaded), 1)
         self.assertEqual(uploaded[0][0], event_id)
