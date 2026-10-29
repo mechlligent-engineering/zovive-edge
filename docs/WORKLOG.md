@@ -3,8 +3,9 @@
 
 Every claim below is marked:
 
-- **verified**: checked in this repository or on the laptop; the evidence is named.
-- **reported**: stated in the original Day 1 notes and not yet checked.
+- **verified**: checked in this repository, on the laptop, or on the Pi by the
+  owner; the evidence is named.
+- **reported**: stated in earlier notes and not yet checked.
 - **open**: known not to be done.
 
 Hailo performance counts as verified only when it was measured on the real Pi.
@@ -14,13 +15,13 @@ Hailo performance counts as verified only when it was measured on the real Pi.
 | Item | Status |
 |---|---|
 | Root cause of the bad detections (sloth_bear 1.00 on every frame) | **verified** on the laptop; see section 2 |
-| Which HEF the Pi runs | **open**; identify it by sha256 (section 3) with the read-only Pi check |
+| HEF the Pi runs | **verified** by the owner on 29 Oct: R1, `b999f784...c1f1`, at `/opt/zovive/models/detector.hef`; see section 3 |
+| `zovive-detect` running on the live CP Plus RTSP feed | **verified** by the owner on 29 Oct (PID 863182 at the time) |
+| R1 validation | B0 and B1 **passed**; AP50 **failed** on elephant by 0.2 points and the owner **accepted** it as an exception; gates C and D **open**; see section 6 |
+| Live elephant (0.67-0.76) and gaur detections, no latency issues | **reported** by the owner; whether elephants were in view and the FPS are not recorded; see section 6 |
 | Split-head DFL decoder and per-class NMS (`73d8ea4`, `84652ff` on `develop`) | **verified** in the repository; see section 4 |
-| `zovive-detect` running under systemd with live RTSP from the camera at 192.168.1.250 | **reported** |
 | `/var/lib/zovive` and `/var/log/zovive` re-owned to `zovive1` to fix `PermissionError: [Errno 13]` | **reported**; this was a production change on the Pi |
-| 85.37 ms end-to-end, 11.7 FPS on `ZOVIVE_FINAL_150E_BEST.hef` | **reported**; not reproduced; see section 5 |
-| "Clean outputs, no background hallucination" | **open**; no empty-frame or per-class AP figures exist for any HEF yet |
-| Isolated rebuild R1 | **in progress**; see section 6 |
+| 85.37 ms end-to-end, 11.7 FPS | **reported** for the overnight HEF, which R1 has replaced; not reproduced; see section 5 |
 
 ## 2. Root cause
 
@@ -49,14 +50,16 @@ Identify a HEF by its sha256, never by its file name.
 
 | sha256 | File (laptop copy) | Build | Status |
 |---|---|---|---|
+| `b999f7842b6bcc0326a57de06c66958f38d521310ac5e03a79bc4c4a52bfc1f1` | `zovive-ml/hailo_builds/det150e_h8l_r1/hef/zovive_det150e_h8l_r1.hef`, 48,530,992 B, 29 Oct 05:21 UTC | R1: compiled from optimized HAR `31fc382e...e35f`; normalization, optimization level 1, `calib_1024` | **deployed** (section 1); accepted AP50 exception (section 6) |
+| `7aa106253c550b62edcc8aff3922bdf89f0d9ece71543909b15e0366fc3d4993` | `ZOVIVE_FINAL_150E_BEST.hef`, 54,175,048 B, 29 Oct 02:38 IST | normalization present, optimization level 0, `calib_500` (deer and gaur only) | **not validated**; replaced on the Pi by R1 |
 | `2d460f582a0a64cf68bd3c9731f42f1725ef6dfcfc8a4f08e9cbf4374d6cc967` | `detector.hef`, 48,505,071 B, 28 Oct | no model script (no /255), optimization level 0, `calib_500` | **faulty**; must not run in production |
-| `7aa106253c550b62edcc8aff3922bdf89f0d9ece71543909b15e0366fc3d4993` | `ZOVIVE_FINAL_150E_BEST.hef`, 54,175,048 B, 29 Oct 02:38 IST | normalization present, optimization level 0, `calib_500` (deer and gaur only) | **not validated** against the ONNX reference |
-| (pending) | `hailo_builds/det150e_h8l_r1/` | normalization, optimization level 1, `calib_1024` (train split, every species plus empty frames) | **in progress** |
 
-The faulty HEF was built from `ZOVIVE_FINAL_150E_BEST.onnx`
-(sha256 `7fa08795...1224`); the overnight HEF carries the same network name.
-That ONNX differs from this repository's `models/detector.onnx`
-(sha256 `404de609...8652`).
+All three come from `ZOVIVE_FINAL_150E_BEST.onnx` (sha256 `7fa08795...1224`;
+the R1 copy is hash-verified, the other two carry its network name). That
+ONNX differs from this repository's `models/detector.onnx`
+(sha256 `404de609...8652`), and this repository's `models/manifest.json`
+records no `sha256_hef`. **Open:** record the deployed ONNX and HEF hashes in
+the manifest (a production change that needs the owner's approval).
 
 ## 4. Post-processing (verified in the repository)
 
@@ -71,19 +74,23 @@ That ONNX differs from this repository's `models/detector.onnx`
 Known differences, not yet decided:
 
 - `decode_split_heads` drops boxes 8 px or smaller in the 640 letterbox
-  (`yolo_postprocess.py:193`); `decode_yolo_detections` does not. Parity
-  checks that compare the two count small boxes the ONNX keeps as HEF
-  misses, and the filter works against small, distant animals.
+  (`yolo_postprocess.py:193`); `decode_yolo_detections` does not. No test
+  box is that small, so the R1 results below are unaffected, but the filter
+  works against small, distant animals.
 - Neither decoder drops boxes centred in the letterbox padding any more;
   the version in `6524fb9` did.
 
 ## 5. Performance on the Pi
 
-The original notes report 85.37 ms end-to-end and 11.7 FPS for
-`ZOVIVE_FINAL_150E_BEST.hef` on a Raspberry Pi 5 with the Hailo-8L. These
-figures have not been reproduced. Neither the command nor the frame source
-was recorded. Acceptance (decision D5) needs all of the following, measured
-on the Pi with the candidate HEF:
+R1: no FPS, latency, memory or temperature figures have been measured yet
+(gate D). The owner reports no latency issues on the live feed.
+
+The original notes report 85.37 ms end-to-end and 11.7 FPS for the overnight
+`ZOVIVE_FINAL_150E_BEST.hef`. These figures were not reproduced, and neither
+the command nor the frame source was recorded.
+
+Acceptance (decision D5) needs all of the following, measured on the Pi with
+the candidate HEF:
 
 - At least 5 FPS (10 FPS stretch), p50 and p95 latency, memory and
   temperature.
@@ -94,39 +101,78 @@ on the Pi with the candidate HEF:
   - mean score difference <= 0.05
 - AP50 drop of at most 3 points per class.
 - Elephant-to-sloth-bear errors and empty-frame false positives no worse
-  than the ONNX baseline. The ONNX baseline fires on 1 of 104 empty test
-  frames: tiger, 0.49.
+  than the ONNX baseline.
 
-## 6. R1 rebuild
+## 6. R1 rebuild (deployed)
 
-Folder: `zovive-ml/hailo_builds/det150e_h8l_r1/` (commands and gates in its
-`BUILD.md`). It is isolated: nothing outside that folder is written and
-nothing is deployed.
+Folder: `zovive-ml/hailo_builds/det150e_h8l_r1/`. Commands, hashes, logs and
+full results are in its `BUILD.md`.
 
 - The model script loads the normalization line, sets optimization level 1
   and compression level 0, and uses 256 calibration entries.
 - The calibration set comes from the train split only: 128 images per
   species plus 128 empty frames, letterboxed with this repository's
   `letterbox()`.
-- Gates:
+- Compile: `hailo compiler har/02_optimized.har --hw-arch hailo8l
+  --output-dir hef`, default compiler settings, 29 Oct 04:57-05:21 UTC, six
+  contexts. Log: `hef/hailo_sdk.core.log`.
 
-  | Gate | Where | What |
-  |---|---|---|
-  | B0 | laptop | float emulator |
-  | B1 | laptop | quantized emulator |
-  | C | Pi | parity, using `pi/dump_detections.py` |
-  | D | Pi | FPS and latency |
+### Gates
 
-  Compiling the HEF, running gates C and D, and deploying each need separate
-  approval.
+| Gate | Where | What | Result |
+|---|---|---|---|
+| B0 | laptop | float emulator vs ONNX, 100 test images | **passed**: identical outputs |
+| B1 | laptop | quantized emulator vs ONNX, 100 test images | **passed**: matched 0.961, same species 1.000, mean IoU 0.967, mean score difference 0.047 |
+| AP50 | laptop | quantized emulator vs ONNX vs ground truth, full test split (679 images, 730 boxes, 104 empty) | **failed** on elephant (3.2 points; limit 3.0); accepted as an exception |
+| C | Pi | parity, using `pi/dump_detections.py` | **open** |
+| D | Pi | FPS, p50/p95 latency, memory, temperature | **open** |
 
-## 7. Deployment layout (reported; confirm with the read-only Pi check)
+### AP50 findings
 
-- Service: `zovive-detect.service` (systemd).
-- Code: `/opt/zovive`, said to be a symlink to `/home/zovive1/zovive-edge`.
-  `docs/STORAGE_LAYOUT.md` describes `/opt/zovive` as the code location.
-- Virtual environment: `/opt/zovive/.venv/`.
-- Branch on the Pi: `develop`.
+| Class | GT boxes | AP50 ONNX | AP50 R1 | Drop (points) | Recall at 0.45, ONNX to R1 |
+|---|---|---|---|---|---|
+| deer | 52 | 0.970 | 0.973 | -0.3 | 0.96 to 0.94 |
+| gaur | 114 | 0.959 | 0.957 | 0.2 | 0.90 to 0.89 |
+| leopard | 50 | 0.954 | 0.962 | -0.8 | 0.94 to 0.94 |
+| elephant | 156 | 0.875 | 0.843 | **3.2** | 0.81 to 0.81 |
+| sloth_bear | 55 | 0.951 | 0.925 | 2.6 | 0.87 to 0.78 |
+| tiger | 105 | 0.891 | 0.889 | 0.2 | 0.84 to 0.79 |
+| wild_boar | 198 | 0.959 | 0.935 | 2.4 | 0.91 to 0.88 |
+| mAP50 | 730 | 0.937 | 0.926 | 1.1 | |
+
+- Empty test images with a detection at 0.45: ONNX 1 of 104, R1 0 of 104.
+- Elephant boxes called sloth bear at 0.45: 1 for both.
+
+**Accepted exception (owner, 29 Oct 2026):** the elephant AP50 drop of 3.2
+points, 0.2 over the 3.0 limit, is accepted as an operational compromise,
+given the two-day deadline and zero detections on the 104 empty test images.
+R1b (16-bit output heads) and R1-GPU were not started.
+
+### Known limitations to watch on the live feed
+
+- At the deployed 0.45 threshold, sloth bear recall falls from 0.87 to 0.78
+  and tiger from 0.84 to 0.79, so some animals the ONNX would report are
+  missed.
+- Elephant precision falls from 0.93 to 0.89: more wild boar, tiger and
+  sloth bear boxes are labelled elephant.
+- The empty test images are not this camera's scenes. An empty desk frame
+  (`test_detected.jpg` in the repository root, which also has boxes drawn on
+  it) scores elephant 0.88 on R1 and 0.93 on the ONNX. That false positive
+  comes from the model, not the quantization, and should be retested on a
+  clean camera frame. (`real_wildlife.jpg`, an elephant photo, is correctly
+  elephant: 0.95 on both.) Check the snapshots behind the live elephant
+  detections (0.67-0.76) against what was actually in view.
+
+## 7. Deployment layout
+
+- HEF: `/opt/zovive/models/detector.hef` is R1 (**verified** by the owner).
+- Service: `zovive-detect.service` (systemd) (**verified** running by the
+  owner).
+- Code: `/opt/zovive`, said to be a symlink to `/home/zovive1/zovive-edge`
+  (**reported**). `docs/STORAGE_LAYOUT.md` describes `/opt/zovive` as the
+  code location.
+- Virtual environment: `/opt/zovive/.venv/` (**reported**).
+- Branch on the Pi: `develop` (**reported**).
 - Network: the Pi in use answers at 192.168.1.111. `docs/NETWORK_MAP.md`
   gives node 1's Pi as 192.168.1.101. The original notes also mention a
   192.168.137.x link on `eth0` with no internet gateway, and syncing through
@@ -145,14 +191,19 @@ nothing is deployed.
    it loaded. A HEF built without it is the faulty build.
 4. Identify a HEF by its sha256 (section 3) before reasoning about it.
 5. Never deploy a HEF, replace `models/detector.hef` or edit
-   `models/manifest.json` without the owner's explicit approval, and never
-   deploy one that has not passed the gates in section 5.
+   `models/manifest.json` without the owner's explicit approval. Never deploy
+   one that has not passed the gates in section 5, unless the owner records
+   an exception here, as for R1 (section 6).
 6. Report Hailo performance only from measurements on the real Pi, with the
    command, HEF hash and frame source recorded.
 7. Never print `.env`, camera credentials or keys.
 
 ## 9. Roadmap
 
+- [ ] **R1 gates C and D on the Pi.** Parity with the ONNX and FPS, p50/p95
+  latency, memory and temperature for `b999f784...c1f1`.
+- [ ] **Live-feed check.** Review the snapshots behind live elephant
+  detections; collect real CP Plus frames for empty-scene evaluation.
 - [ ] **Telemetry.** The heartbeat already carries the SoC temperature
   (`health_main.py`). Hailo chip temperature, PCIe throughput and frame-drop
   rate are not reported yet.
