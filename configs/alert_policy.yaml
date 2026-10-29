@@ -6,5 +6,5 @@ alert_policy:
   high_priority_species: ["tiger", "leopard", "elephant", "sloth_bear"]
   # Send an "unknown_animal" alert even when the voted species confidence
   # is below inference_config.yaml stage2.min_confidence, rather than dropping it.
-  send_unknown_animal_alerts: true
+  send_unknown_animal_alerts: false
   min_snapshot_sharpness: 40.0

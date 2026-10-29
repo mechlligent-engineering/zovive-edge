@@ -61,7 +61,13 @@ stage2:
   # "unknown_animal" with the snapshot instead of a (possibly wrong)
   # species name. The detector keeps boxes from confidence_threshold (or
   # the species' class_confidence_thresholds value) up.
-  min_confidence: 0.55
+  # 0.50, the lowest class threshold: stage1_gate only confirms a track
+  # whose leading species averages at least that species' threshold over
+  # the same frames this vote uses, so a confirmed track keeps its species.
+  # Higher, a confirmed tiger, sloth bear or deer track voted below it
+  # would become unknown_animal, which alert_policy.yaml
+  # send_unknown_animal_alerts: false drops without an alert.
+  min_confidence: 0.50
   # Vote over at most this many of the track's most recent frames.
   max_frames_per_track: 10
   # How the per-frame detector results are combined into one species:

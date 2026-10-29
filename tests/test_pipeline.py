@@ -57,8 +57,9 @@ class TestPipelineIntegration(unittest.TestCase):
     def _build_zoom(self):
         return AnimalZoomController(FakeLensCamera(), mode_manager=ModeManager())
 
-    def _run_frames(self, per_frame_detections: list[list[Detection]]) -> None:
-        """One tracker/gate/dispatcher stack, one batch per entry, real SQLite outbox."""
+    def _run_frames(self, per_frame_detections: list[list[Detection]], send_unknown: bool = True) -> None:
+        """One tracker/gate/dispatcher stack, one batch per entry, real SQLite
+        outbox. The alert policy is the test's own, not configs/alert_policy.yaml."""
         detection_queue = DetectionQueue(maxsize=20)
         tracker = IouTracker(
             iou_match_threshold=0.3, max_age_frames=15, min_hits_to_confirm=1, presence_window=5
@@ -68,7 +69,12 @@ class TestPipelineIntegration(unittest.TestCase):
             "node": {"camera_id": "cam01", "camera_name": "Test Cam", "forest_name": "Test Forest", "gps": {}}
         }
         evidence_store = EvidenceStore(snapshot_dir=paths.SNAPSHOT_DIR)
-        dispatcher = AlertDispatcher(AlertQueue(), evidence_store=evidence_store, node_config=node_cfg)
+        dispatcher = AlertDispatcher(
+            AlertQueue(),
+            evidence_store=evidence_store,
+            node_config=node_cfg,
+            alert_policy={"alert_policy": {"send_unknown_animal_alerts": send_unknown}},
+        )
         frame = blank_frame(320, 240)
         for i, detections in enumerate(per_frame_detections):
             detection_queue.put(
@@ -130,6 +136,18 @@ class TestPipelineIntegration(unittest.TestCase):
 
         pending = get_pending(limit=10)
         self.assertEqual([e["animal_name"] for e in pending], ["unknown_animal"])
+
+    def test_ambiguous_track_produces_no_event_when_unknown_alerts_are_off(self):
+        # The deployed policy (alert_policy.yaml send_unknown_animal_alerts:
+        # false): the same ambiguous track is dropped, not sent as unknown.
+        box = (100, 80, 180, 160)
+        frames = [
+            [Detection(box=box, score=0.9, class_id=5, class_name="tiger")],
+            [Detection(box=box, score=0.9, class_id=2, class_name="leopard")],
+            [Detection(box=box, score=0.9, class_id=3, class_name="elephant")],
+        ]
+        self._run_frames(frames, send_unknown=False)
+        self.assertEqual(get_pending(limit=10), [])
 
     def test_no_detections_produce_no_events(self):
         detection_queue = DetectionQueue(maxsize=20)
