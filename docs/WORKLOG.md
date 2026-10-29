@@ -22,6 +22,7 @@ Hailo performance counts as verified only when it was measured on the real Pi.
 | Decoder restored to `6524fb9` (class-agnostic NMS, padding filter, layout checks) in `acf1192` | **verified** in the repository: ruff clean, 672 tests pass; Pi update **open**; see section 4 |
 | `/var/lib/zovive` and `/var/log/zovive` re-owned to `zovive1` to fix `PermissionError: [Errno 13]` | **reported**; this was a production change on the Pi |
 | 85.37 ms end-to-end, 11.7 FPS | **reported** for the overnight HEF, which R1 has replaced; not reproduced; see section 5 |
+| Merge of `develop` into `main` | PR [#2](https://github.com/mechlligent-engineering/zovive-edge/pull/2), open; GitHub reports no conflicts; local CI checks pass (ruff, pytest, unittest, bandit) |
 
 ## 2. Root cause
 
