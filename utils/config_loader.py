@@ -484,10 +484,8 @@ def _number_issue(
 def _check_inference_config(
     data: Mapping[str, Any], source: str, env: Mapping[str, str]
 ) -> list[ConfigIssue]:  # noqa: ARG001
-    """detector.class_confidence_thresholds must name the model's own classes
-    and must not sit below detector.confidence_threshold, the threshold the
-    detector decodes at: a lower one could never take effect, and a misspelt
-    class would silently leave that species at the default."""
+    """The detector's confidence thresholds and the stage-1 confirmation
+    gate (pipeline/stage1_gate.py) settings in the `detector` section."""
     det = data.get("detector")
     if det is None:
         return [ConfigIssue(source, "detector", "required section is missing", IssueKind.MISSING_KEY)]
@@ -497,6 +495,45 @@ def _check_inference_config(
                 source, "detector", f"expected a mapping, got {type(det).__name__}", IssueKind.INVALID_TYPE
             )
         ]
+    return _threshold_issues(det, source) + _gate_issues(det, source)
+
+
+def _gate_issues(det: Mapping[str, Any], source: str) -> list[ConfigIssue]:
+    """Each confirmation-gate setting that is present must be in range, and
+    the presence vote must be passable: more hits than frames in its window
+    would mean no track could ever be confirmed."""
+    issues: list[ConfigIssue] = []
+    hits = det.get("min_hits_in_window")
+    window = det.get("window_size")
+    for key, value in (("min_hits_in_window", hits), ("window_size", window)):
+        if value is not None:
+            problem = _number_issue(value, source, f"detector.{key}", integer=True, min_value=1)
+            if problem is not None:
+                issues.append(problem)
+    for key in ("min_track_duration_sec", "min_box_area_px", "track_alert_cooldown_sec"):
+        if key in det:
+            problem = _number_issue(det[key], source, f"detector.{key}", min_value=0)
+            if problem is not None:
+                issues.append(problem)
+    if not issues:
+        hits = 3 if hits is None else hits  # Stage1Config's defaults
+        window = 5 if window is None else window
+        if hits > window:
+            issues.append(
+                ConfigIssue(
+                    source,
+                    "detector.min_hits_in_window",
+                    f"{hits} is more than window_size ({window}), so no track could ever be confirmed",
+                )
+            )
+    return issues
+
+
+def _threshold_issues(det: Mapping[str, Any], source: str) -> list[ConfigIssue]:
+    """detector.class_confidence_thresholds must name the model's own classes
+    and must not sit below detector.confidence_threshold, the threshold the
+    detector decodes at: a lower one could never take effect, and a misspelt
+    class would silently leave that species at the default."""
     issues: list[ConfigIssue] = []
 
     default = det.get("confidence_threshold", _DEFAULT_DECODE_THRESHOLD)
@@ -560,8 +597,9 @@ def load(path: str | Path, required: bool = True) -> dict[str, Any]:
     ``${VAR}`` without a default whose variable is unset or empty, and
     anything the file's ``_RUNTIME_CHECKS`` entry rejects (rtsp_config.yaml:
     camera.host and the camera credentials; inference_config.yaml: the
-    detector's confidence thresholds). A failed load is not cached. A
-    missing file with ``required=False`` loads as ``{}``.
+    detector's confidence thresholds and confirmation-gate settings). A
+    failed load is not cached. A missing file with ``required=False``
+    loads as ``{}``.
     """
     p = Path(path).resolve()
     if p in _file_cache:

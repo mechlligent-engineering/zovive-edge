@@ -35,10 +35,20 @@ detector:
     sloth_bear: 0.50
     deer: 0.50
   nms_iou_threshold: 0.45
-  # A track needs an animal in at least this many of the last N frames
-  # before stage1_gate promotes it to a real event (see track_state_machine.py).
-  min_hits_in_window: 3
-  window_size: 5
+  # pipeline/stage1_gate.py promotes a track to a real event only when
+  # every check passes (see track_state_machine.py):
+  # - an animal in at least min_hits_in_window of the last window_size
+  #   frames (5 of 7 lets two missed frames, e.g. leaves, through;
+  #   window_size equal to min_hits_in_window means strictly consecutive),
+  min_hits_in_window: 5
+  window_size: 7
+  # - seen for at least this long, first to last sighting,
+  min_track_duration_sec: 1.0
+  # - a box of at least this many original-frame pixels (0 = off; set it
+  #   only after measuring real camera frames),
+  min_box_area_px: 0
+  # - and the track's leading species, averaged over its recent frames,
+  #   at or above that species' class_confidence_thresholds value.
   # Per-track cooldown: suppress duplicate events for the same track for
   # this long after its last alert (stops a sleeping tiger alerting forever).
   track_alert_cooldown_sec: 300.0

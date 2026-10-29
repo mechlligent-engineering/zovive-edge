@@ -17,8 +17,9 @@ capture thread (RtspReader | FileFrameSource)
                         whether anything is recording — see "Event video")
                      -> pipeline/track_state_machine.advance() per track
                         (NEW -> CONFIRMING -> CONFIRMED, gated by
-                         pipeline/stage1_gate's 3-of-5 presence vote
-                         + per-track cooldown)
+                         pipeline/stage1_gate: 5-of-7 presence vote,
+                         >= 1 s duration, the species' mean confidence,
+                         optional box area + per-track cooldown)
                      -> on CONFIRMED: pipeline/stage2_verifier votes the
                         species from the track's per-frame detector
                         (class, score) results via stage2.voting_strategy
@@ -142,12 +143,17 @@ empty-forest->Leopard, 1-of-45 Wild Boar recall) are a dataset/model
 problem the retraining plan (see the project report) addresses
 directly. What the software adds on top:
 
-1. A track needs 3 of the last 5 frames as "animal present"
-   (`pipeline/stage1_gate.py`) before anything happens — a single-frame
-   false positive is just noise, not an alert.
-2. The species is voted over up to 10 of the track's recent detector
+1. Each species has its own confidence threshold
+   (`detector.class_confidence_thresholds`, `inference/class_thresholds.py`);
+   weaker detections are dropped before tracking.
+2. A track needs 5 of the last 7 frames as "animal present", at least
+   1 s from first to last sighting, and its leading species' mean
+   confidence at that species' threshold (`pipeline/stage1_gate.py`)
+   before anything happens — a single-frame or flickering false positive
+   is just noise, not an alert.
+3. The species is voted over up to 10 of the track's recent detector
    results (`pipeline/stage2_verifier.py`), not taken from one frame.
-3. Below `stage2.min_confidence`, the event is reported as
+4. Below `stage2.min_confidence`, the event is reported as
    `unknown_animal` with the snapshot rather than a guessed species.
 
 None of this fixes a genuinely bad model — it only stops a good-but-imperfect

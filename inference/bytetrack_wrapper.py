@@ -48,7 +48,8 @@ class Track:
     age_since_seen: int = 0
     first_seen_ts: float = field(default_factory=time.time)
     last_seen_ts: float = field(default_factory=time.time)
-    # last N (is_animal_present) votes for stage1_gate's 3-of-5 rule
+    # last N (is_animal_present) votes for stage1_gate's presence vote
+    # (min_hits_in_window of window_size)
     presence_history: list[bool] = field(default_factory=list)
     # last N (class_name, score) of the detections matched to this track,
     # newest last: what pipeline/stage2_verifier.py votes the species from.
