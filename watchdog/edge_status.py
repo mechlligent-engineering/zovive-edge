@@ -98,6 +98,7 @@ class EdgeStatus:
         queues: dict | None = None,
         supervisor: dict | None = None,
         process: dict | None = None,
+        dispatch: dict | None = None,
     ) -> dict:
         with self._lock:
             return {
@@ -118,6 +119,8 @@ class EdgeStatus:
                 "queues": queues or {},
                 "supervisor": supervisor or {},
                 "process": process or {},
+                # pipeline/dispatch_worker.py: alerts written, rejected, failed
+                "dispatch": dispatch or {},
             }
 
 

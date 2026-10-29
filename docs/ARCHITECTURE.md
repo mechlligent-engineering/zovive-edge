@@ -25,14 +25,21 @@ capture thread (RtspReader | FileFrameSource)
                         (class, score) results via stage2.voting_strategy
                         ("average" or "majority"); no second model runs.
                         pipeline/best_snapshot picks the alert snapshot
-                     -> pipeline/alert_dispatcher: db/outbox row first
-                        (durable), then storage/evidence_store snapshot,
-                        then queues/alert_queue for the sender
+                     -> pipeline/dispatch_worker.dispatch(): decides the
+                        event (policy, event_id, priority; no I/O) and
+                        queues it (bounded, never blocks; a full queue is
+                        logged as an ERROR and the track isn't alerted)
                      -> on a dispatched alert: pipeline/clip_extractor.start()
                         begins an event video clip (pre-roll already
                         buffered + live post-roll), written async and
                         attached to the same event_id via
                         db/outbox.set_video_path() when ready
+                -> dispatch thread (pipeline/dispatch_worker.run):
+                        storage/evidence_store snapshot first, then the
+                        db/outbox row, then queues/alert_queue for the
+                        sender (pipeline/alert_dispatcher steps), retried
+                        from the failed step; a finished clip's path goes
+                        through the same queue, so after its row
                      -> camera_control/patrol_controller.tick() each
                         cycle: MOVING -> SETTLING -> SCANNING -> (ENGAGED
                         on a confirmed target) -> COOLDOWN -> MOVING
@@ -106,7 +113,9 @@ alert is dispatched, `pipeline/clip_extractor.ClipExtractor.start()`
 snapshots that buffer as the clip's pre-roll and keeps collecting
 `post_event_seconds` more via the same per-cycle feed; once the window
 closes, the MP4 is written on a short-lived background thread (never
-the pipeline thread) and `db/outbox.set_video_path()` marks it ready.
+the pipeline thread) and `db/outbox.set_video_path()` marks it ready,
+called through the dispatch thread's queue so it always follows the
+event's own row.
 `transfer_main.py` uploads it via `BaseStationClient.send_video()` on
 its own retry timeline (`video_status`, independent of the image
 alert's `status`) — a lost or slow clip never risks the durability

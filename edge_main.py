@@ -1,6 +1,6 @@
 """Entry point for the detection process (systemd: zovive-detect.service).
 
-Three threads, deliberately kept separate so a slow stage never stalls
+Four threads, deliberately kept separate so a slow stage never stalls
 an earlier one:
 
     capture thread   (RtspReader or FileFrameSource, started internally)
@@ -18,6 +18,12 @@ an earlier one:
         A confirmed animal that is far away is first zoomed in on (optical
         zoom + autofocus only; the camera never pans or tilts), re-detected
         and voted again in the zoomed view, and alerted with that snapshot
+            v
+    dispatch thread  (pipeline/dispatch_worker.py)
+        the alert's disk writes, in order: snapshot JPEG, outbox row,
+        alert_queue payload, so a slow disk never stalls the pipeline
+        thread. Event clips are written by their own short-lived threads
+        (pipeline/clip_extractor.py).
 
 transfer_main.py and health_main.py are separate processes/systemd
 units on purpose (see their own docstrings): nothing in this file
@@ -42,7 +48,6 @@ from capture.file_source import FileFrameSource
 from capture.rtsp_reader import RtspReader
 from db.init_db import init_db
 from db.migrations import migrate
-from db.outbox import set_video_path
 from inference.base import Detector
 from inference.bytetrack_wrapper import IouTracker
 from inference.class_thresholds import ClassThresholds
@@ -53,6 +58,7 @@ from logger_setup import configure_root, get_logger
 from pipeline.alert_dispatcher import AlertDispatcher
 from pipeline.best_snapshot import BestSnapshotStore
 from pipeline.clip_extractor import ClipExtractor
+from pipeline.dispatch_worker import DispatchWorker
 from pipeline.motion_gate import MotionGate
 from pipeline.stage1_gate import Stage1Config, Stage1Gate
 from pipeline.stage2_verifier import VerifiedResult, verify_track
@@ -211,7 +217,7 @@ def _verify_and_dispatch(
     stage2_cfg: dict,
     snapshot_image,
     track_id: str,
-    dispatcher: AlertDispatcher,
+    dispatcher: AlertDispatcher | DispatchWorker,
     view_name: str,
     model_version: str,
 ) -> tuple[VerifiedResult, str | None]:
@@ -249,7 +255,7 @@ def _pipeline_loop(
     zone_filter: ZoneFilter,
     motion_gate: MotionGate,
     snapshot_store: BestSnapshotStore,
-    dispatcher: AlertDispatcher,
+    dispatcher: AlertDispatcher | DispatchWorker,
     inf_cfg: dict,
     model_version: str,
     stop_event: threading.Event,
@@ -456,12 +462,14 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
 
     detection_queue = DetectionQueue()
     alert_queue = AlertQueue()
-    dispatcher = AlertDispatcher(alert_queue, node_config=node_cfg)
+    # The pipeline thread decides the event; the dispatch thread writes it
+    # (snapshot, outbox row, alert_queue payload: pipeline/dispatch_worker.py).
+    dispatcher = DispatchWorker(AlertDispatcher(alert_queue, node_config=node_cfg))
 
-    # on_clip_ready=set_video_path is the only link between clip_extractor
-    # and the DB: it never touches db.outbox directly otherwise, matching
-    # how alert_dispatcher.py owns the actual insert_event() call.
-    clip_extractor = ClipExtractor(on_clip_ready=set_video_path)
+    # on_clip_ready is the only link between clip_extractor and the DB: the
+    # clip's path is recorded through the dispatch queue, so always after
+    # its event row (db.outbox.set_video_path).
+    clip_extractor = ClipExtractor(on_clip_ready=dispatcher.video_path_ready)
 
     watchdog_cfg = load(paths.WATCHDOG_CONFIG, required=False).get("watchdog", {})
     status_interval = max(1.0, float(watchdog_cfg.get("edge_status_write_interval_sec", 5)))
@@ -518,6 +526,12 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
             on_restart=reset_pipeline,
         )
     )
+    # Its queue outlives a crashed thread, so a restart needs no reset.
+    dispatch_worker = supervisor.add(
+        SupervisedThread(
+            "dispatch", lambda: dispatcher.run(_shutdown_event), liveness=lambda: dispatcher.loop_ts
+        )
+    )
 
     supervisor.start_all()
     log.info("capture started", extra={"camera_id": camera_id, "backend": node_cfg["runtime"]["backend"]})
@@ -526,13 +540,16 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
     reason, exit_code = "shutdown requested", EXIT_OK
     try:
         reason, exit_code = _supervise(
-            supervisor, edge_status, capture, history, status_interval, _shutdown_event
+            supervisor, edge_status, capture, history, status_interval, _shutdown_event, dispatcher
         )
     finally:
         _shutdown_event.set()
         sd_notify.stopping()
         capture.stop()
         supervisor.join_all(timeout_each=5.0)
+        # The dispatch thread drains queued alerts for up to
+        # drain_timeout_sec after the stop event; give it that long.
+        dispatch_worker.join(dispatcher.drain_timeout_sec)
         if exit_code == EXIT_OK:
             # Finish in-progress event clips with whatever post-roll they
             # have. Skipped when escalating: the process is about to be torn
@@ -543,7 +560,7 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
         # closing those could hang too, so they are left to process exit.
         if zoom.state != ZoomState.WIDE:
             lens_camera.zoom_to(zoom.plan_config.wide_zoom_level)
-        _write_edge_status(edge_status, capture, supervisor, history)
+        _write_edge_status(edge_status, capture, supervisor, history, dispatcher)
         record_exit(paths.RESTART_HISTORY_PATH, history, reason, exit_code, time.time())
         log.info("edge_main stopped", extra={"reason": reason, "exit_code": exit_code})
     return exit_code
@@ -556,6 +573,7 @@ def _supervise(
     history: dict,
     status_interval: float,
     stop_event: threading.Event,
+    dispatcher: DispatchWorker | None = None,
 ) -> tuple[str, int]:
     """Main-thread loop: restart crashed workers, escalate hung or exhausted
     ones, publish status, and keep the systemd watchdog fed. Returns
@@ -572,14 +590,18 @@ def _supervise(
         # thread hangs, systemd's WatchdogSec kills and restarts the process.
         sd_notify.watchdog_ping()
         if time.monotonic() >= next_status_write:
-            _write_edge_status(edge_status, capture, supervisor, history)
+            _write_edge_status(edge_status, capture, supervisor, history, dispatcher)
             next_status_write = time.monotonic() + status_interval
         stop_event.wait(SUPERVISOR_POLL_SEC)
     return "shutdown requested", EXIT_OK
 
 
 def _write_edge_status(
-    edge_status: EdgeStatus, capture, supervisor: Supervisor | None = None, history: dict | None = None
+    edge_status: EdgeStatus,
+    capture,
+    supervisor: Supervisor | None = None,
+    history: dict | None = None,
+    dispatcher: DispatchWorker | None = None,
 ) -> None:
     """Publish this process's health for health_main.py. A failed write
     (disk full, permissions) is logged, never fatal: health_main reports
@@ -590,6 +612,7 @@ def _write_edge_status(
             queues=queues_snapshot(),
             supervisor=supervisor.snapshot() if supervisor else None,
             process=history,
+            dispatch=dispatcher.snapshot() if dispatcher else None,
         )
         write_status_file(paths.EDGE_STATUS_PATH, snapshot)
     except (OSError, TypeError, ValueError):

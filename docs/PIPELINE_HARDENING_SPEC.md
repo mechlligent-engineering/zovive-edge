@@ -1,9 +1,9 @@
 # Pipeline hardening spec
 
 Status: approved 29 Oct 2026 with decisions D1-D5 as recommended (section 8).
-Baseline: `develop` at `e28cc9d`. Phase B (changes 1 and 2) is implemented on
-`feature/pipeline-hardening`; change 3 is Phase C. Not yet reconciled with the
-nine locally modified tracked files on the Pi (section 6).
+Baseline: `develop` at `e28cc9d`. Changes 1 and 2 (Phase B) and change 3
+(Phase C) are implemented on `feature/pipeline-hardening`. Not yet reconciled
+with the nine locally modified tracked files on the Pi (section 6).
 
 ## 1. Goals and non-goals
 
@@ -123,7 +123,7 @@ The spec's top-level `global_min_confidence` maps onto the existing `detector.co
 
 **Frame rate:** the reported rate is about 10-12 FPS, so 5 hits take about 0.5 s and the 1.0 s duration is the binding condition.
 
-**Tests:** in `tests/test_stage1_gate.py`, one case per condition, plus the cooldown and a missed-frame tolerance case. `test_pipeline` and `test_video_pipeline_integration` are updated.
+**Tests:** in `tests/test_stage1_gate.py`, one case per condition, plus the cooldown, a missed-frame tolerance case and the config checks. `test_pipeline` and `test_video_pipeline_integration` needed no change: they build `Stage1Config` explicitly, and its defaults keep the old gate.
 
 ## 5. Change 3: alert disk writes off the pipeline thread
 
@@ -132,29 +132,41 @@ The spec's top-level `global_min_confidence` maps onto the existing `detector.co
 - `AlertDispatcher.dispatch()` saves the snapshot JPEG and inserts the outbox row **on the pipeline thread**.
 - MP4 clips are already written by background threads: 8 s pre-roll from the RAM ring buffer plus 8 s post-roll, at most 4 at once.
 
-**New `pipeline/dispatch_worker.py`:**
+**New `pipeline/dispatch_worker.py` (as implemented):**
 
-- **Submitting:** a `DispatchWorker` thread with a bounded `queue.Queue(maxsize=64)`. The pipeline thread builds an `AlertJob` and calls `submit()` (`put_nowait`).
-  - The job carries the event id, track id, species, confidence, priority, view, model version, camera id and the snapshot image.
-  - The event id is a `uuid4`, generated at submit time so the clip can start immediately.
-- **The worker:** saves the snapshot(s), then inserts the outbox row, then pushes to `alert_queue`. That's the same order as today, so an outbox row never points to a missing snapshot.
-- **Clips:** `ClipExtractor.start()` stays on the pipeline thread; it only copies frame references from the RAM buffer. The clip's `set_video_path` callback is routed through the dispatch queue, so it always runs after its event row exists.
-- **Queue full:** the pipeline thread never blocks. The job goes to a bounded overflow list (256) on the pipeline side and is retried every cycle. Beyond that, an ERROR log and an edge-status counter record it. An alert is lost only if the disk stalls for minutes.
+- **Steps:** `AlertDispatcher.dispatch()` is split into `prepare()` (policy, event id, priority; no I/O), `save_snapshot()`, `insert()` and `announce()`. `dispatch()` still runs all four in one call, so the tests and tools that use it synchronously are unchanged.
+- **Submitting:** `DispatchWorker.dispatch()` has the same signature as `AlertDispatcher.dispatch()`, so `_pipeline_loop` takes either.
+  - On the pipeline thread it runs `prepare()`, then a non-blocking put of the job on a bounded `queue.Queue(maxsize=256)`, and returns the event id at once.
+  - The job carries the event record (id, track, species, confidence, priority, view, model version, camera) and the snapshot image.
+  - The event id is a `uuid4` created in `prepare()`, so the clip can start immediately.
+- **The worker:** saves the snapshot, then inserts the outbox row, then pushes to `alert_queue`. That's the same order as before, so an outbox row never points to a missing snapshot.
+- **Clips:**
+  - `ClipExtractor.start()` stays on the pipeline thread; it only copies frame references from the RAM buffer.
+  - The clip's `on_clip_ready` is `DispatchWorker.video_path_ready()`. It queues `set_video_path` behind the event's own job, so the path always follows the row.
+  - When the worker isn't running (after shutdown), or the queue stays full for 30 s, the path is recorded directly.
+- **Queue full:** the pipeline thread never blocks. `dispatch()` logs an ERROR naming the event, counts it as rejected and returns None, so the track isn't marked alerted and no clip starts without a row.
+  - This replaces the first draft's 64-slot queue plus a 256-slot overflow list on the pipeline side: one 256-slot queue gives the same capacity with one structure.
 - **Write failures:**
-  - A job is retried up to 3 times with backoff, then logged as ERROR and counted. This replaces today's "raise, so the supervisor restarts the pipeline thread".
-  - The worker is a `SupervisedThread`, so a restart keeps queued jobs.
-- **Shutdown:** the worker drains for up to 10 s before `clip_extractor.flush_all()`.
+  - A job is retried from the step that failed (the evidence store refuses to overwrite a saved snapshot), up to 3 attempts with 0.5 s and 1 s backoff. After that it's logged as ERROR naming the event and counted as failed.
+  - This replaces "raise, so the supervisor restarts the pipeline thread".
+  - The worker runs as the supervised `dispatch` thread. Its queue outlives a crash, so a restart keeps queued jobs.
+- **Shutdown:**
+  - After the stop event, the worker keeps writing until the queue is empty or 10 s have passed. `edge_main` waits that long for it before `clip_extractor.flush_all()`.
+  - Anything still queued then is logged as ERROR and counted.
+- **Visibility:** the edge status file has a `dispatch` section with these counts: dispatched, rejected, failed, retries, video paths, last error. Its `queues.dispatch_queue` entry shows depth and rejections, like every other queue.
 
 **Snapshots:** one per event, the best frame from `BestSnapshotStore`, as today (decision D4). A second snapshot would need a DB migration and a transfer change, and is out of scope.
 
-**Tests:**
+**Tests** (`tests/test_dispatch_worker.py`):
 
-- Ordering (snapshot, then row, then queue).
-- Queue full and overflow.
-- Retries.
-- The `set_video_path` ordering.
-- The shutdown drain.
-- A pipeline thread that never blocks on a slow fake disk.
+- Ordering (snapshot, then row, then queue), with nothing written on the calling thread.
+- A full queue rejected loudly.
+- Retry from the failed step.
+- Persistent failure reported, with no row written.
+- The `set_video_path` ordering on a stalled disk.
+- The shutdown drain, and the drain timeout.
+- A pipeline thread that never waits for a stalled disk.
+- `_pipeline_loop` producing the same single event through the worker.
 
 ## 6. Reconciliation with the Pi (before any deployment)
 
