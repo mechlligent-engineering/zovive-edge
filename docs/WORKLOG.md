@@ -19,7 +19,7 @@ Hailo performance counts as verified only when it was measured on the real Pi.
 | `zovive-detect` running on the live CP Plus RTSP feed | **verified** by the owner on 29 Oct (PID 863182 at the time) |
 | R1 validation | B0 and B1 **passed**; AP50 **failed** on elephant by 0.2 points and the owner **accepted** it as an exception; gates C and D **open**; see section 6 |
 | Live elephant (0.67-0.76) and gaur detections, no latency issues | **reported** by the owner; whether elephants were in view and the FPS are not recorded; see section 6 |
-| Split-head DFL decoder and per-class NMS (`73d8ea4`, `84652ff` on `develop`) | **verified** in the repository; see section 4 |
+| Decoder restored to `6524fb9` (class-agnostic NMS, padding filter, layout checks) in `acf1192` | **verified** in the repository: ruff clean, 672 tests pass; Pi update **open**; see section 4 |
 | `/var/lib/zovive` and `/var/log/zovive` re-owned to `zovive1` to fix `PermissionError: [Errno 13]` | **reported**; this was a production change on the Pi |
 | 85.37 ms end-to-end, 11.7 FPS | **reported** for the overnight HEF, which R1 has replaced; not reproduced; see section 5 |
 
@@ -63,22 +63,25 @@ the manifest (a production change that needs the owner's approval).
 
 ## 4. Post-processing (verified in the repository)
 
-`inference/yolo_postprocess.py` exports both decoders:
+`inference/yolo_postprocess.py` was restored to `6524fb9` in `acf1192`. It
+exports both decoders, and they share one selection step:
 
-- `decode_split_heads`: Hailo. It reads six NHWC head outputs, gates
-  candidates on the inverse-sigmoid logit threshold, rebuilds boxes from the
-  DFL bins, then runs per-class NMS.
+- `decode_split_heads`: Hailo. `split_head_layout` matches the six NHWC
+  outputs to strides by shape and raises on anything it cannot decode, so
+  `HailoDetector` falls back to ONNX and releases the device. The decoder
+  applies the sigmoid and rebuilds boxes from the DFL bins.
 - `decode_yolo_detections`: ONNX, from the single `[1, 4 + classes, 8400]`
-  output, with the same per-class NMS.
+  output, after checking its shape.
+- Shared selection: confidence threshold, boxes centred in the letterbox
+  padding dropped, one class-agnostic NMS (one species per box), boxes
+  mapped back to the frame.
 
-Known differences, not yet decided:
-
-- `decode_split_heads` drops boxes 8 px or smaller in the 640 letterbox
-  (`yolo_postprocess.py:193`); `decode_yolo_detections` does not. No test
-  box is that small, so the R1 results below are unaffected, but the filter
-  works against small, distant animals.
-- Neither decoder drops boxes centred in the letterbox padding any more;
-  the version in `6524fb9` did.
+The overnight rewrite (`73d8ea4`, `84652ff`) switched to per-class NMS,
+dropped the padding filter and the layout checks, and added a HEF-only 8 px
+minimum box size. It failed 13 tests and was reverted. The R1 gate figures
+in section 6 were measured with the rewrite. B1 re-scored with the restored
+decoder is unchanged (matched 0.961, mean IoU 0.967). **Open:** the Pi runs
+the rewrite until the restored `develop` is deployed there.
 
 ## 5. Performance on the Pi
 
@@ -213,7 +216,7 @@ R1b (16-bit output heads) and R1-GPU were not started.
   should gate alerts before MQTT and cloud sync.
 - [ ] **SAHI tiling.** `inference/sahi_slicer.py` exists and is off
   (`sahi.enabled: false`). Evaluate it on high-resolution streams for
-  distant animals, together with the 8 px box filter in section 4.
+  distant animals.
 - [ ] **Exposure profiles.** Day and night switching in `camera_control`
   based on the average brightness inside detection boxes.
 - [ ] **Offline storage and sync.** Validate queuing under
