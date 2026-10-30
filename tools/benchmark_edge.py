@@ -197,11 +197,19 @@ def _vstream_info(info: Any) -> dict:
         shape = [int(x) for x in getattr(info, "shape", ())]
     except (TypeError, ValueError):
         shape = None  # NMS outputs have no plain tensor shape
-    nms_shape = getattr(info, "nms_shape", None)
+    order = getattr(fmt, "order", None)
+    nms_shape = None
+    if is_nms_format(order):
+        # HailoRT 4.23 raises its own exception (not AttributeError) when
+        # nms_shape is read on a raw-tensor output; its classes only exist on the Pi
+        try:
+            nms_shape = getattr(info, "nms_shape", None)
+        except Exception:
+            nms_shape = None
     return {
         "name": str(getattr(info, "name", "")),
         "shape": shape,
-        "format_order": str(getattr(fmt, "order", None)),
+        "format_order": str(order),
         "format_type": str(getattr(fmt, "type", None)),
         "nms_shape": str(nms_shape) if nms_shape is not None else None,
     }

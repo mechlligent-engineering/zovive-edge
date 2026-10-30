@@ -33,6 +33,23 @@ def _info(name, shape, order="FormatOrder.NHWC"):
     return NS(name=name, shape=shape, format=NS(order=order, type="FormatType.FLOAT32"))
 
 
+class _HailoRT423Info:
+    """A vstream info as HailoRT 4.23 behaves on the Pi: reading nms_shape on
+    a raw-tensor output raises HailoRT's own exception, not AttributeError."""
+
+    def __init__(self, name, shape, order="FormatOrder.NHWC", nms_shape=None):
+        self.name = name
+        self.shape = shape
+        self.format = NS(order=order, type="FormatType.FLOAT32")
+        self._nms_shape = nms_shape
+
+    @property
+    def nms_shape(self):
+        if "NMS" not in self.format.order or self._nms_shape is None:
+            raise RuntimeError("nms_shape is availale only on nms order vstreams")
+        return self._nms_shape
+
+
 def _fake_hpf(outputs_by_path, broken_paths=()):
     class FakeHef:
         def __init__(self, path):
@@ -113,6 +130,26 @@ class TestInspectHefs(unittest.TestCase):
         self.assertTrue(det["hailo_detector_compatible"])
         self.assertNotIn("incompatible_because", det)
         self.assertEqual(set(report["models"]), {"detector"})
+
+    def test_hailort_4_23_split_head_detector_is_readable(self):
+        outputs = {"det.hef": [_HailoRT423Info(o.name, o.shape) for o in SPLIT_HEADS]}
+        det = inspect_hefs(HEF_PATHS, NUM_CLASSES, hpf=_fake_hpf(outputs))["models"]["detector"]
+        self.assertNotIn("error", det)
+        self.assertTrue(det["hailo_detector_compatible"])
+        self.assertEqual([o["nms_shape"] for o in det["outputs"]], [None] * 6)
+
+    def test_vstream_info_reads_nms_shape_only_on_nms_outputs(self):
+        raw = benchmark_edge._vstream_info(_HailoRT423Info("yolov11/conv71", (80, 80, 64)))
+        self.assertEqual(raw["shape"], [80, 80, 64])
+        self.assertIsNone(raw["nms_shape"])
+        nms_order = "FormatOrder.HAILO_NMS_BY_CLASS"
+        nms = benchmark_edge._vstream_info(
+            _HailoRT423Info("nms", (), nms_order, nms_shape="NmsShape(7, 100)")
+        )
+        self.assertEqual(nms["nms_shape"], "NmsShape(7, 100)")
+        unreadable = benchmark_edge._vstream_info(_HailoRT423Info("nms", (), nms_order))
+        self.assertIsNone(unreadable["nms_shape"])
+        self.assertEqual(unreadable["format_order"], nms_order)
 
     def test_single_exported_head_is_flagged_incompatible(self):
         det = inspect_hefs(HEF_PATHS, NUM_CLASSES, hpf=_fake_hpf(RAW_DETECTOR))["models"]["detector"]
