@@ -29,6 +29,7 @@ ONNX model's on the Pi; numbers only come from running it there.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 
@@ -58,7 +59,19 @@ def _import_hailo():
 
 class _HailoRunner:
     """HEF-loading + single-input/multi-output inference helper behind
-    HailoDetector."""
+    HailoDetector.
+
+    The InferVStreams pipeline is opened and the network group activated
+    once, on the first run(), and kept for the runner's lifetime; building
+    them for every frame cost about 19 new threads per inference on the Pi
+    (docs/PERSISTENT_VSTREAMS_SPEC.md). Holding the group active assumes
+    this is the only network group on the device, which it is: the node
+    runs one model. A failed inference tears the pipeline down and the next
+    run() opens it again. Every touch of the pipeline holds the NPU lock."""
+
+    # How long close() waits for an inference in progress before leaving
+    # the pipeline and device to process exit (a hung native call).
+    CLOSE_LOCK_TIMEOUT_SEC = 5.0
 
     def __init__(self, hef_path: str, scheduler: NpuScheduler):
         # Checked first, so a model that was never deployed is reported as
@@ -69,6 +82,9 @@ class _HailoRunner:
         self._hpf = hpf
         self.scheduler = scheduler
         self.target = None
+        self._stack: contextlib.ExitStack | None = None
+        self._pipeline = None
+        self._closed = False
 
         try:
             self.hef = hpf.HEF(hef_path)
@@ -101,29 +117,68 @@ class _HailoRunner:
                 f"HailoRT could not load {hef_path}: {type(exc).__name__}: {exc}"
             ) from exc
 
+    def _open(self) -> None:
+        """Pipeline first, then activation: the nesting HailoRT's own
+        examples use. Caller holds the NPU lock."""
+        stack = contextlib.ExitStack()
+        try:
+            pipeline = stack.enter_context(
+                self._hpf.InferVStreams(
+                    self.network_group, self.input_vstreams_params, self.output_vstreams_params
+                )
+            )
+            stack.enter_context(self.network_group.activate(self.network_group_params))
+        except BaseException:
+            stack.close()
+            raise
+        self._stack, self._pipeline = stack, pipeline
+
+    def _teardown(self) -> None:
+        """Deactivate, then release the vstreams. Caller holds the NPU lock."""
+        stack, self._stack, self._pipeline = self._stack, None, None
+        if stack is None:
+            return
+        try:
+            stack.close()
+        except Exception:  # noqa: BLE001 - HailoRT's exception classes only exist on the Pi
+            log.exception("error closing the Hailo inference pipeline")
+
     def run(self, input_tensor: np.ndarray) -> dict[str, np.ndarray]:
         """`input_tensor`: HxWxC uint8, NHWC (Hailo's native layout).
         Returns every output by name, batch dimension removed."""
-        hpf = self._hpf
 
         def _infer():
-            with hpf.InferVStreams(
-                self.network_group, self.input_vstreams_params, self.output_vstreams_params
-            ) as infer_pipeline:
-                with self.network_group.activate(self.network_group_params):
-                    input_data = {self.input_vstream_info.name: input_tensor[np.newaxis, ...]}
-                    results = infer_pipeline.infer(input_data)
-                    return {name: np.asarray(value)[0] for name, value in results.items()}
+            if self._closed:
+                raise InferenceBackendError("the Hailo runner is closed")
+            if self._pipeline is None:
+                self._open()
+            input_data = {self.input_vstream_info.name: input_tensor[np.newaxis, ...]}
+            try:
+                results = self._pipeline.infer(input_data)
+            except Exception:
+                self._teardown()  # reopened on the next call
+                raise
+            return {name: np.asarray(value)[0] for name, value in results.items()}
 
         return self.scheduler.run(_infer)
 
     def close(self) -> None:
-        if self.target is None:
-            return
-        try:
-            self.target.release()
-        except Exception:  # noqa: BLE001 - best-effort cleanup
-            log.exception("error releasing Hailo VDevice")
+        """Idempotent. Waits for an inference in progress, up to
+        CLOSE_LOCK_TIMEOUT_SEC; past that a native call is hung, and the
+        pipeline and device are left to process exit."""
+        with self.scheduler.exclusive(timeout=self.CLOSE_LOCK_TIMEOUT_SEC) as locked:
+            if not locked:
+                log.warning("Hailo device busy at close; leaving it to process exit")
+                return
+            self._closed = True
+            self._teardown()
+            target, self.target = self.target, None
+            if target is None:
+                return
+            try:
+                target.release()
+            except Exception:  # noqa: BLE001 - best-effort cleanup
+                log.exception("error releasing Hailo VDevice")
 
 
 def _to_nhwc_uint8_rgb(image_letterboxed) -> np.ndarray:

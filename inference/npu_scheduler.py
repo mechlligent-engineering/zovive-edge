@@ -14,7 +14,8 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -52,6 +53,18 @@ class NpuScheduler:
                     self._stats.calls += 1
                     self._stats.total_latency_sec += elapsed
                     self._stats.recent_latencies.append(elapsed)
+
+    @contextmanager
+    def exclusive(self, timeout: float = -1) -> Iterator[bool]:
+        """The device lock without a latency sample, for setup and teardown.
+        Yields whether the lock was taken within `timeout` seconds (-1: wait
+        as long as it takes)."""
+        acquired = self._lock.acquire(timeout=timeout)
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                self._lock.release()
 
     def snapshot(self) -> dict:
         with self._stats_lock:
