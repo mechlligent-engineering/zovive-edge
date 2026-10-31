@@ -39,3 +39,13 @@ logs/*
 # Temporary files
 /tmp_*
 /diff*.patch
+
+# Local test and scratch files
+*.log
+*.deb
+*.deb.*
+*.jpg
+test_*.py
+clean_inference.py
+run_inference.py
+test_results/
