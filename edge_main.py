@@ -388,13 +388,16 @@ def _pipeline_loop(
     log.info("pipeline loop stopped")
 
 
-def run(source_override: str | None = None, max_cycles: int | None = None) -> int:
+def run(
+    source_override: str | None = None, max_cycles: int | None = None, source_fps: float | None = None
+) -> int:
     """Runs until shutdown. Returns the process exit code: EXIT_OK, or
-    EXIT_SUPERVISOR when a worker hung or used up its restarts."""
+    EXIT_SUPERVISOR when a worker hung or used up its restarts.
+    `source_fps`: playback rate of a `file:` source (None: FileFrameSource's default)."""
     configure_root("detect")
     history = record_start(paths.RESTART_HISTORY_PATH, time.time())
     try:
-        return _run(history, source_override, max_cycles)
+        return _run(history, source_override, max_cycles, source_fps)
     except BaseException as exc:
         # Startup failures (missing model, bad config) and anything else that
         # escapes: record why, then let it propagate (systemd restarts us).
@@ -404,7 +407,9 @@ def run(source_override: str | None = None, max_cycles: int | None = None) -> in
         raise
 
 
-def _run(history: dict, source_override: str | None, max_cycles: int | None) -> int:
+def _run(
+    history: dict, source_override: str | None, max_cycles: int | None, source_fps: float | None = None
+) -> int:
     conn = init_db()
     migrate(conn)
 
@@ -437,7 +442,8 @@ def _run(history: dict, source_override: str | None, max_cycles: int | None) -> 
         kind, _, value = source_override.partition(":")
         if kind != "file":
             raise ValueError("--source must be 'file:<path>' or omitted for the real RTSP camera")
-        capture = FileFrameSource(frame_slot, value, camera_id=camera_id)
+        fps = {} if source_fps is None else {"target_fps": source_fps}
+        capture = FileFrameSource(frame_slot, value, camera_id=camera_id, **fps)
     else:
         capture = RtspReader(frame_slot, camera_id=camera_id, config=rtsp_cfg)
 
@@ -627,9 +633,17 @@ def main() -> None:
         help="override the camera source, e.g. 'file:/path/to/video.mp4' for dev/testing without a camera",
     )
     parser.add_argument("--max-cycles", type=int, default=None, help="stop after N pipeline cycles (testing)")
+    parser.add_argument(
+        "--source-fps",
+        type=float,
+        default=None,
+        help="playback rate of a --source file (default 8; the live camera delivers about 25)",
+    )
     args = parser.parse_args()
+    if args.source_fps is not None and (not args.source or args.source_fps <= 0):
+        parser.error("--source-fps needs --source file:<path> and a rate above 0")
     try:
-        exit_code = run(source_override=args.source, max_cycles=args.max_cycles)
+        exit_code = run(source_override=args.source, max_cycles=args.max_cycles, source_fps=args.source_fps)
     except ConfigError as exc:
         # Missing camera credentials or a bad config file: one clear line
         # naming the file, key and variable (never its value), no traceback.
