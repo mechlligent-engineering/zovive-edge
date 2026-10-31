@@ -44,8 +44,10 @@ logs/*
 *.log
 *.deb
 *.deb.*
-*.jpg
-test_*.py
+# Anchored to the repo root: unanchored, these also matched tests/test_*.py
+# (and any future fixture image), so new tests would be silently left out.
+/*.jpg
+/test_*.py
 clean_inference.py
 run_inference.py
 test_results/
