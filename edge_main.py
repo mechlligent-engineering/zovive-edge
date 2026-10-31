@@ -60,6 +60,7 @@ from pipeline.best_snapshot import BestSnapshotStore
 from pipeline.clip_extractor import ClipExtractor
 from pipeline.dispatch_worker import DispatchWorker
 from pipeline.motion_gate import MotionGate
+from pipeline.recent_alerts import DEFAULT_WINDOW_SEC, RecentAlerts
 from pipeline.stage1_gate import Stage1Config, Stage1Gate
 from pipeline.stage2_verifier import VerifiedResult, verify_track
 from pipeline.track_state_machine import TrackState, TrackStateMachine
@@ -262,8 +263,13 @@ def _pipeline_loop(
     max_cycles: int | None = None,
     clip_extractor: ClipExtractor | None = None,
     status: EdgeStatus | None = None,
+    recent_alerts: RecentAlerts | None = None,
 ) -> None:
+    """`recent_alerts` (pipeline/recent_alerts.py) remembers every alert by
+    place and class so a new track over an already-alerted animal doesn't
+    alert again; None uses the zoom controller's own store."""
     stage2_cfg = inf_cfg.get("stage2", {})
+    alerts = recent_alerts if recent_alerts is not None else zoom.recent_alerts
     cycles = 0
     while not stop_event.is_set():
         if status is not None:
@@ -316,6 +322,11 @@ def _pipeline_loop(
         if status is not None:
             status.pipeline_tick(active_tracks=len(tracks))
         active_ids = {t.track_id for t in tracks}
+        if view == WIDE_VIEW:
+            # Something still at an alerted place keeps that alert's memory
+            # alive, whatever track id it has now.
+            for track in tracks:
+                alerts.seen(track.class_name, track.box)
         track_sm.sweep_lost(active_ids)
         for tid in list(snapshot_store.active_track_ids()):
             if tid not in active_ids:
@@ -332,10 +343,11 @@ def _pipeline_loop(
                 continue
 
             if view == WIDE_VIEW:
-                known = zoom.match_known(track.class_name, track.box)
+                known = alerts.match(track.class_name, track.box)
                 if known is not None:
-                    # Same animal already handled before/while zooming, back
-                    # under a new track id: don't re-zoom or re-alert it.
+                    # Same animal (or the same false positive) already
+                    # alerted, back under a new track id: don't re-zoom or
+                    # re-alert it.
                     track_sm.mark_classified(
                         track.track_id, known.species or track.class_name, known.confidence
                     )
@@ -365,6 +377,9 @@ def _pipeline_loop(
             track_sm.mark_classified(track.track_id, result.species, result.confidence)
             if event_id:
                 track_sm.mark_alerted(track.track_id, event_id)
+                if view == WIDE_VIEW:
+                    # Zoomed alerts are remembered by zoom.complete(), with their wide-view box.
+                    alerts.remember(track.box, track.class_name, result.species, result.confidence, event_id)
                 if clip_extractor is not None:
                     clip_extractor.start(
                         event_id=event_id, track_id=track.track_id, camera_id=batch.camera_id
@@ -450,7 +465,12 @@ def _run(
     lens_camera = build_camera(node_cfg, rtsp_cfg)
     camera_modes_cfg = load(paths.CAMERA_MODES_CONFIG)
     mode_manager = ModeManager.from_config(camera_modes_cfg)
-    zoom = AnimalZoomController.from_config(lens_camera, camera_modes_cfg, mode_manager=mode_manager)
+    recent_alerts = RecentAlerts(
+        window_sec=float(inf_cfg["detector"].get("realert_window_sec", DEFAULT_WINDOW_SEC))
+    )
+    zoom = AnimalZoomController.from_config(
+        lens_camera, camera_modes_cfg, mode_manager=mode_manager, recent_alerts=recent_alerts
+    )
     # Start from a known lens position: fully wide and focused.
     lens_camera.zoom_to(zoom.plan_config.wide_zoom_level)
     lens_camera.trigger_autofocus()
@@ -527,6 +547,7 @@ def _run(
                 max_cycles,
                 clip_extractor,
                 edge_status,
+                recent_alerts=recent_alerts,
             ),
             liveness=edge_status.pipeline_loop_ts,
             on_restart=reset_pipeline,

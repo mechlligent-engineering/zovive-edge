@@ -27,6 +27,8 @@ mode:
     # Give up on the zoomed re-detection after this long and alert with
     # the wide-view snapshot instead.
     zoomed_timeout_sec: 10.0
-    # After a zoom session, don't re-zoom or re-alert the same animal
-    # (new wide-view track id) for this long.
+    # Not used by edge_main: re-zoom and re-alert suppression comes from the
+    # pipeline's per-place memory, inference_config.yaml
+    # detector.realert_window_sec. Only a zoom controller built without that
+    # memory (tests) forgets a zoomed animal after this long.
     suppress_realert_sec: 60.0

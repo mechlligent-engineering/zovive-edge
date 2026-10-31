@@ -52,6 +52,13 @@ detector:
   # Per-track cooldown: suppress duplicate events for the same track for
   # this long after its last alert (stops a sleeping tiger alerting forever).
   track_alert_cooldown_sec: 300.0
+  # Per-place memory (pipeline/recent_alerts.py): a new track of the same
+  # class over an alerted place is the same animal again, not a new alert,
+  # until nothing has been seen there for this long. The tracker gives an
+  # animal a new track id after every detection gap, so the per-track
+  # cooldown alone let one static object alert 59 times in a night
+  # (docs/REALERT_SUPPRESSION_SPEC.md).
+  realert_window_sec: 300.0
 
 # Stage 2: the species decision for a confirmed track, voted from the
 # detector's own per-frame (class, score) results for that track

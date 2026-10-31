@@ -17,9 +17,12 @@ changes the zoom and asks the lens to refocus.
     RETURNING  : zoom_to(wide) issued, then autofocus again, then WIDE.
 
 After a session, the animal (and any other animal already alerted when
-the zoom started) is remembered for `suppress_realert_sec`, so the new
-track id it gets in the wide view doesn't cause a second zoom or a
-duplicate alert.
+the zoom started) is remembered in a RecentAlerts store
+(pipeline/recent_alerts.py), so the new track id it gets in the wide view
+doesn't cause a second zoom or a duplicate alert. edge_main passes the
+pipeline's own store, which also holds wide-view alerts and sets the
+window; without one (tests) the controller keeps a private store that
+forgets after `suppress_realert_sec`.
 
 Takes its camera and clock as constructor arguments so it can be
 unit-tested with FakeLensCamera and a manually advanced fake clock.
@@ -38,6 +41,7 @@ import numpy as np
 from camera_control.camera_api import LensCamera
 from camera_control.mode_manager import ModeManager
 from camera_control.zoom_planner import ZoomPlanConfig, magnification_to_zoom_level, plan_zoom
+from pipeline.recent_alerts import RecentAlert, RecentAlerts
 
 log = logging.getLogger(__name__)
 
@@ -70,25 +74,6 @@ class ZoomSession:
     confidence: float = 0.0
 
 
-@dataclass
-class KnownAnimal:
-    box: tuple[float, float, float, float]
-    class_name: str
-    species: str | None
-    confidence: float
-    event_id: str | None
-    expires_ts: float
-
-
-def _center_inside(
-    box: tuple[float, float, float, float], region: tuple[float, float, float, float], grow: float
-) -> bool:
-    x1, y1, x2, y2 = region
-    gx, gy = (x2 - x1) * grow, (y2 - y1) * grow
-    cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
-    return (x1 - gx) <= cx <= (x2 + gx) and (y1 - gy) <= cy <= (y2 + gy)
-
-
 class AnimalZoomController:
     def __init__(
         self,
@@ -101,6 +86,7 @@ class AnimalZoomController:
         zoomed_timeout_sec: float = 10.0,
         suppress_realert_sec: float = 60.0,
         clock: Callable[[], float] = time.time,
+        recent_alerts: RecentAlerts | None = None,
     ):
         self.camera = camera
         self.plan_config = plan_config or ZoomPlanConfig()
@@ -116,7 +102,9 @@ class AnimalZoomController:
         self.session: ZoomSession | None = None
         self._deadline: float | None = None
         self._focus_then: ZoomState = ZoomState.ZOOMED
-        self._known: list[KnownAnimal] = []
+        self.recent_alerts = (
+            recent_alerts if recent_alerts is not None else RecentAlerts(suppress_realert_sec, clock=clock)
+        )
 
     @property
     def view_name(self) -> str:
@@ -207,7 +195,8 @@ class AnimalZoomController:
             self.session.event_id = event_id
             self.session.species = species
             self.session.confidence = confidence
-            self.remember(self.session.wide_box, self.session.class_name, species, confidence, event_id, now)
+            # No `now`: the store runs on its own clock, which needn't be this one.
+            self.remember(self.session.wide_box, self.session.class_name, species, confidence, event_id)
         self.camera.zoom_to(self.plan_config.wide_zoom_level)
         self.state = ZoomState.RETURNING
         self._deadline = now + self.zoom_settle_sec
@@ -246,26 +235,23 @@ class AnimalZoomController:
         event_id: str | None,
         now: float | None = None,
     ) -> None:
-        now = now if now is not None else self.clock()
-        self._known.append(
-            KnownAnimal(box, class_name, species, confidence, event_id, now + self.suppress_realert_sec)
-        )
+        """`now`, when given, is on the store's clock (recent_alerts.clock)."""
+        self.recent_alerts.remember(box, class_name, species, confidence, event_id, now)
 
     def match_known(
         self, class_name: str, box: tuple[float, float, float, float], now: float | None = None
-    ) -> KnownAnimal | None:
+    ) -> RecentAlert | None:
         """A recently handled wide-view animal this new track is probably
         the same individual as (same class, centre within its old box)."""
-        now = now if now is not None else self.clock()
-        self._known = [k for k in self._known if k.expires_ts > now]
-        for k in self._known:
-            if k.class_name == class_name and _center_inside(box, k.box, grow=0.5):
-                return k
-        return None
+        return self.recent_alerts.match(class_name, box, now)
 
     @classmethod
     def from_config(
-        cls, camera: LensCamera, camera_modes_cfg: dict, mode_manager: ModeManager | None = None
+        cls,
+        camera: LensCamera,
+        camera_modes_cfg: dict,
+        mode_manager: ModeManager | None = None,
+        recent_alerts: RecentAlerts | None = None,
     ) -> AnimalZoomController:
         z = camera_modes_cfg.get("mode", {}).get("zoom", {})
         return cls(
@@ -277,4 +263,5 @@ class AnimalZoomController:
             focus_settle_sec=float(z.get("focus_settle_sec", 1.5)),
             zoomed_timeout_sec=float(z.get("zoomed_timeout_sec", 10.0)),
             suppress_realert_sec=float(z.get("suppress_realert_sec", 60.0)),
+            recent_alerts=recent_alerts,
         )

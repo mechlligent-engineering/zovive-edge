@@ -245,6 +245,13 @@ class TestGateConfigChecks(unittest.TestCase):
             ],
         )
 
+    def test_realert_window_must_be_a_positive_number(self):
+        self.assertEqual(self._issues("  realert_window_sec: 300\n"), [])
+        for bad in ("0", "-5", "soon"):
+            with self.subTest(value=bad):
+                issues = self._issues(f"  realert_window_sec: {bad}\n")
+                self.assertEqual([i.key for i in issues], ["detector.realert_window_sec"])
+
 
 class TestDeployedGateConfig(unittest.TestCase):
     def setUp(self):
@@ -258,6 +265,11 @@ class TestDeployedGateConfig(unittest.TestCase):
         self.assertEqual(cfg.min_box_area_px, 0.0)
         self.assertEqual(cfg.track_alert_cooldown_sec, 300.0)
         self.assertEqual(cfg.class_thresholds.for_class("elephant"), 0.60)
+
+    def test_repository_config_sets_the_approved_realert_memory_and_track_age(self):
+        # docs/REALERT_SUPPRESSION_SPEC.md decisions A1 (S1) and A2 (S2).
+        self.assertEqual(load(paths.INFERENCE_CONFIG)["detector"]["realert_window_sec"], 300.0)
+        self.assertEqual(load(paths.TRACKING_CONFIG)["tracker"]["max_age_frames"], 40)
 
 
 if __name__ == "__main__":

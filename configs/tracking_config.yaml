@@ -1,8 +1,12 @@
 # bytetrack_wrapper.py tracker tuning.
 tracker:
   iou_match_threshold: 0.3
-  # Frames a track can go undetected before it's dropped.
-  max_age_frames: 15
+  # Pipeline cycles a track can go undetected before it's dropped. 40 is
+  # about 5 s at the ~8 cycles/s the pipeline manages with a track active:
+  # at 15 (about 2 s), detections dipping under their class threshold split
+  # one animal into a new track every few minutes
+  # (docs/REALERT_SUPPRESSION_SPEC.md, S2).
+  max_age_frames: 40
   # Consecutive hits required before a track is considered "confirmed"
   # (separate from the stage1 3-of-5 animal-presence vote).
   min_hits_to_confirm: 2

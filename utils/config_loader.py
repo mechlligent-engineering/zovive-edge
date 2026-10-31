@@ -515,6 +515,10 @@ def _gate_issues(det: Mapping[str, Any], source: str) -> list[ConfigIssue]:
             problem = _number_issue(det[key], source, f"detector.{key}", min_value=0)
             if problem is not None:
                 issues.append(problem)
+    if "realert_window_sec" in det:  # pipeline/recent_alerts.py: entries must live a while
+        problem = _number_issue(det["realert_window_sec"], source, "detector.realert_window_sec", gt=0)
+        if problem is not None:
+            issues.append(problem)
     if not issues:
         hits = 3 if hits is None else hits  # Stage1Config's defaults
         window = 5 if window is None else window
