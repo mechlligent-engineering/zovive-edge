@@ -1,6 +1,9 @@
 # Persistent Hailo inference pipeline: design and benchmark plan
 
-Status: **approved 31 Oct 2026 (P1-P4); option A implemented, waiting for the Pi benchmark.**
+Status: **approved 31 Oct 2026 (P1-P4); option A implemented and benchmarked on the Pi (section 5a). It is identical in output and 11% faster, at the device ceiling.**
+
+- **Adopted 31 Oct 2026**, with the near-zero thread-ID criterion waived: inference already runs at the device's FPS ceiling.
+- Deployment is in the R1 build's `pi/RUNBOOK_DEPLOY_689b72d.md`. It is waiting for the owner's go-ahead on the Pi.
 
 - The runner is `inference/hailo_inference._HailoRunner`, with `NpuScheduler.exclusive()` for close. Tests are in `tests/test_hailo_runner.py`.
 - The replay tooling is `tools/profile_threads.py` and `edge_main --source-fps`.
@@ -104,6 +107,35 @@ These steps run on the Pi. Steps 2 and 3 **stop `zovive-detect`**, so they need 
 - a 30-minute candidate soak shows flat RSS and no inference errors.
 
 Otherwise keep today's simpler code. Deploying the candidate is a separate decision with a separate approval.
+
+## 5a. Results on the Pi (30 Oct 2026, 20:42-21:17Z Pi clock, service stopped 35 min)
+
+The runbook is the R1 build's `pi/RUNBOOK_BENCH_689b72d.md`; the files are in `reports/pi/bench_689b72d/`. The comparison is base `52bb464` vs candidate `689b72d`, on the R1 HEF with HailoRT 4.23 and Python 3.13.
+
+| Measure | base | cand | Threshold | Verdict |
+|---|---|---|---|---|
+| Parity, 102 photos | | 102 of 102 detections identical; 40 of 40 raw-head files bit-identical (max diff 0) | identical | **pass** |
+| Live inference FPS (5-min RTSP soak) | 10.05 | **11.16** (+11.0%) | +10% FPS or -10 ms p50 | **pass** |
+| Live latency p50 / p95 | 98.51 / 100.06 ms | 88.87 / 89.58 ms (-9.6 ms) | (either one suffices) | |
+| Photo latency p50, 720p / 4MP | 97.44 / 98.30 ms | 88.83 / 88.84 ms | | |
+| Process CPU (soak) | 0.255 cores | 0.228 cores | | |
+| New thread IDs per second | 191 | **78** | near zero | **fails as written** (see below) |
+| Replay, 300 s of an overnight clip: alerts | 1 | 1 | | |
+| Replay: detection-queue drops | 1 | 74 (0.25/s) | (measured) | |
+| SoC max, throttle flags | 49.6 °C, 0x0 | 49.6 °C, 0x0 | | |
+| 30-minute candidate soak | | not run (it follows a deployment go-ahead) | flat RSS, no errors | pending |
+
+- **Device ceiling:** `hailortcli benchmark` on the HEF gives 11.18 FPS (both hw_only and streaming) and 84.0 ms hardware latency. The candidate's 11.16 FPS live is therefore at the chip's limit.
+  - Host time per frame fell from about 14.5 ms (98.5 - 84.0) to about 4.9 ms (88.9 - 84.0).
+  - Option B (`InferModel`/async) can't raise FPS on this HEF any further.
+- **The 78 thread IDs a second left:** that's 7 per inference, one per vstream (1 input + 6 outputs). This is most likely HailoRT's own `InferVStreams.infer()` starting a thread per vstream on each call, which the persistent pipeline doesn't remove.
+  - Removing it would need hand-written `send`/`recv` threads or option B.
+  - It no longer costs throughput, now that inference is at the device limit.
+- **Re-alert fix (S1+S2, in both trees):** the clip that alerted 33 times in 17 minutes on `b5b8bc8` produced 1 alert in 5 minutes. This is the first on-device evidence for S1.
+- **Replay caveats:**
+  - The file source delivered only about 10.3 (base) and 11.4 (cand) frames a second against `--source-fps 25`, roughly the inference rate, while the live camera delivers about 25. The cause isn't known.
+  - The overnight drop rate (2.2/s with one track) was not reproduced, so the pipeline-stage question stays open for the post-deployment soak.
+- **Profiler:** `tools.profile_threads` fails on Python 3.12+, where `cProfile` sits on a process-wide monitoring hook and only one profiler can be active at a time. Each worker thread exited with an exception. The replays were therefore run without it.
 
 ## 6. Tests (laptop)
 
